@@ -77,3 +77,10 @@ Consistency error, actual: 1681, expected: 1663, stored: 1680, global: 1681
 Failed on CI (net10.0) after the .NET 10-only migration: two activations of the same identity overlapped while members were joining/leaving (Pull/Full rebalance).
 Not a regression: pinned to 2 cores (`taskset -c 0,1`, like the 2-vCPU CI runners) it failed 1/6 runs on the upstream commit 6a570628 and 2/6 on the migrated code; with 16 cores both passed 5/5. Flaky under CPU starvation.
 Root cause found: when an activation request to the activator timed out, the identity owner reported a failure and the retry picked another activator (round-robin), while the timed-out request was still processed by the first one, creating a second activation. Fixed by retrying the same activator (`PartitionConfig.ActivationRequestAttempts`) and remembering unresponsive activators; reproduced by `SlowActivatorTests` (3 activations before the fix, 1 after). After the fix the chaos test passed 6/6 runs pinned to 2 cores.
+
+### Proto.Cluster.MongoIdentity.Tests.ChaosMongoIdentityClusterFixture (class fixture initialization)
+```
+System.Exception : Failed to reach consensus
+   at Proto.Cluster.Tests.ClusterFixture.SpawnClusterNodes(Int32 count, Func`2 configure) in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 323
+```
+All 23 tests of the fixture failed in 1 ms because the 3-member test cluster did not reach gossip topology consensus while starting (first run right after a build, many fixtures starting in parallel). Unrelated to MongoDB; the next two runs passed 70/70.

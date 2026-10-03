@@ -56,6 +56,7 @@
     <PackageVersion Include="MudBlazor" Version="9.11.0" />
     <PackageVersion Include="Neovolve.Logging.Xunit" Version="6.3.0" />
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="OpenTelemetry" Version="1.19.1" />
     <PackageVersion Include="OpenTelemetry.Api" Version="1.19.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.19.1" />

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <!-- C# 11+ for raw string literals in the SQL statements -->
+        <LangVersion>latest</LangVersion>
+        <IsPackable>true</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Proto.Cluster\Proto.Cluster.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Npgsql" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Proto.Cluster.PostgreSqlIdentity.Tests" />
+    </ItemGroup>
+
+</Project>

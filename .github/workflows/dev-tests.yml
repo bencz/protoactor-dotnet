@@ -74,6 +74,17 @@ jobs:
         image: mongo
         ports:
           - 27017/tcp
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     
     strategy:
       fail-fast: false
@@ -83,6 +94,7 @@ jobs:
           - "tests/Proto.Cluster.PartitionIdentity.Tests/*.csproj"
           - "tests/Proto.Cluster.RedisIdentity.Tests/*.csproj"
           - "tests/Proto.Cluster.MongoIdentity.Tests/*.csproj"
+          - "tests/Proto.Cluster.PostgreSqlIdentity.Tests/*.csproj"
           - "tests/Proto.Cluster.PubSub.Tests/*.csproj"
     
     steps:
@@ -115,6 +127,7 @@ jobs:
         env:
           ConnectionStrings__Redis: localhost:${{ job.services.redis.ports[6379] }},syncTimeout=10000
           ConnectionStrings__MongoDB: mongodb://localhost:${{ job.services.mongodb.ports[27017] }}/ProtoMongo
+          ConnectionStrings__PostgreSql: Host=localhost;Port=${{ job.services.postgres.ports[5432] }};Username=postgres;Password=postgres;Database=postgres;Maximum Pool Size=200
         run: |
           dotnet test ${{ matrix.test }} -c Release --logger GitHubActions
 
