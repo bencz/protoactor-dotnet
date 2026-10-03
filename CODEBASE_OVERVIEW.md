@@ -8,7 +8,7 @@
   - `Proto.Actor` – core actor system, props, mailboxes, event stream, supervision, etc.
   - `Proto.Remote` – gRPC-based remoting for actors across nodes.
   - `Proto.Cluster` – clustering support with membership, identity lookup, partitioning, pub/sub, etc.
-  - `Proto.Persistence` – persistence abstractions and providers (Couchbase, DynamoDB, MongoDB, SQLServer, etc.).
+  - `Proto.Persistence` – persistence abstractions and providers (Marten, MongoDB, RavenDB, Sqlite, SQLServer)..
   - Additional modules such as `Proto.OpenTelemetry`, `Proto.TestKit`, `Proto.Analyzers`, code generators.
 - `tests/` – unit and integration test projects for core and extensions.
 - `examples/` – self-contained examples like HelloWorld, supervision patterns, and cluster scenarios.

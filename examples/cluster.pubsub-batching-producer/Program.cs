@@ -10,7 +10,6 @@ using Proto.Cluster.PubSub;
 using Proto.Cluster.Testing;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using ProtosReflection = ClusterPubSubBatchingProducer.ProtosReflection;
 
 Log.SetLoggerFactory(LoggerFactory.Create(l =>

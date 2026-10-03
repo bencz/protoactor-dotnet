@@ -28,7 +28,7 @@ public class RemoteGossipTests
 
         public bool ContainsMemberId(string memberId) => _members.ContainsKey(memberId);
 
-        public bool TryGetMember(string memberId, out Member? value) => _members.TryGetValue(memberId, out value);
+        public bool TryGetMember(string memberId, out Member value) => _members.TryGetValue(memberId, out value);
 
         public Member Self { get; }
 

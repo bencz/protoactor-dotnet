@@ -10,7 +10,6 @@ using Proto.Cluster.Identity;
 using Proto.Cluster.Identity.Redis;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using StackExchange.Redis;
 
 namespace KafkaVirtualActorIngress;

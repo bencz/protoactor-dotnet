@@ -155,7 +155,7 @@ public class PartitionIdentityTests
 
         // Some activation requests may target actors that are already running
         // so the number of received requests can exceed actual actor starts
-        receivedActivationRequests.Should().BeGreaterOrEqualTo(
+        receivedActivationRequests.Should().BeGreaterThanOrEqualTo(
             totalStarts,
             activationStats
         );

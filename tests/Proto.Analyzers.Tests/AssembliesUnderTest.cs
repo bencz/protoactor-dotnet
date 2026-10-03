@@ -10,4 +10,11 @@ internal static class AssembliesUnderTest
         typeof(IActor).Assembly,
         typeof(IBufferMessage).Assembly,
     };
+
+    // The assemblies under test are built for net10.0, so the test compilation must use matching reference assemblies
+    public static readonly ReferenceAssemblies ReferenceAssemblies = new(
+        "net10.0",
+        new PackageIdentity("Microsoft.NETCore.App.Ref", "10.0.0"),
+        Path.Combine("ref", "net10.0")
+    );
 }

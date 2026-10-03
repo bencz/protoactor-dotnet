@@ -9,7 +9,6 @@ using Proto.Cluster.Partition;
 using Proto.Cluster.Testing;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using System.Linq;
 
 namespace ClusterGossip;

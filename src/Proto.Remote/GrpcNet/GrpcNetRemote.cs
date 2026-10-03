@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Health.V1;
 using Grpc.HealthCheck;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Proto.Diagnostics;
 
@@ -20,7 +22,7 @@ public class GrpcNetRemote : BaseGrpcNetRemote
     private EndpointManager _endpointManager = null!;
     private RemotingGrpcService _remotingGrpcService = null!;
     private HealthServiceImpl _healthCheck = null!;
-    private IWebHost? _host;
+    private IHost? _host;
 
     public GrpcNetRemote(ActorSystem system, RemoteConfig config) : base(system, config)
     {
@@ -56,55 +58,63 @@ public class GrpcNetRemote : BaseGrpcNetRemote
 
             IServerAddressesFeature? serverAddressesFeature = null;
 
-            _host = new WebHostBuilder()
-                .UseKestrel()
-                .ConfigureKestrel(serverOptions =>
-                    {
-                        if (_config.ConfigureKestrel == null)
+            _host = new HostBuilder()
+                .ConfigureServices(services =>
+                    // The remote must not react to Ctrl+C / SIGTERM on its own; the actor system owns shutdown
+                    services.AddSingleton<IHostLifetime, NoopHostLifetime>()
+                )
+                .ConfigureWebHost(webHost => webHost
+                    .UseKestrel()
+                    .ConfigureKestrel(serverOptions =>
                         {
-                            serverOptions.Listen(ipAddress, Config.Port,
-                                listenOptions => { listenOptions.Protocols = HttpProtocols.Http2; }
-                            );
+                            if (_config.ConfigureKestrel == null)
+                            {
+                                serverOptions.Listen(ipAddress, Config.Port,
+                                    listenOptions => { listenOptions.Protocols = HttpProtocols.Http2; }
+                                );
+                            }
+                            else
+                            {
+                                serverOptions.Listen(ipAddress, Config.Port,
+                                    listenOptions => _config.ConfigureKestrel(listenOptions)
+                                );
+                            }
                         }
-                        else
+                    )
+                    .ConfigureServices(serviceCollection =>
                         {
-                            serverOptions.Listen(ipAddress, Config.Port,
-                                listenOptions => _config.ConfigureKestrel(listenOptions)
+                            serviceCollection.AddSingleton(Log.GetLoggerFactory());
+
+                            serviceCollection.AddGrpc(options =>
+                                {
+                                    options.MaxReceiveMessageSize = null;
+                                    options.EnableDetailedErrors = true;
+                                }
                             );
+
+                            serviceCollection.AddSingleton<Remoting.RemotingBase>(_remotingGrpcService);
+                            serviceCollection.AddSingleton<Health.HealthBase>(_healthCheck);
+                            serviceCollection.AddSingleton<IRemote>(this);
                         }
-                    }
+                    )
+                    .Configure(app =>
+                        {
+                            app.UseRouting();
+
+                            app.UseEndpoints(endpoints =>
+                                {
+                                    endpoints.MapGrpcService<Remoting.RemotingBase>();
+                                    endpoints.MapGrpcService<Health.HealthBase>();
+                                }
+                            );
+
+                            serverAddressesFeature = app.ServerFeatures.Get<IServerAddressesFeature>();
+                        }
+                    )
                 )
-                .ConfigureServices(serviceCollection =>
-                    {
-                        serviceCollection.AddSingleton(Log.GetLoggerFactory());
+                .Build();
 
-                        serviceCollection.AddGrpc(options =>
-                            {
-                                options.MaxReceiveMessageSize = null;
-                                options.EnableDetailedErrors = true;
-                            }
-                        );
-
-                        serviceCollection.AddSingleton<Remoting.RemotingBase>(_remotingGrpcService);
-                        serviceCollection.AddSingleton<Health.HealthBase>(_healthCheck);
-                        serviceCollection.AddSingleton<IRemote>(this);
-                    }
-                )
-                .Configure(app =>
-                    {
-                        app.UseRouting();
-
-                        app.UseEndpoints(endpoints =>
-                            {
-                                endpoints.MapGrpcService<Remoting.RemotingBase>();
-                                endpoints.MapGrpcService<Health.HealthBase>();
-                            }
-                        );
-
-                        serverAddressesFeature = app.ServerFeatures.Get<IServerAddressesFeature>();
-                    }
-                )
-                .Start();
+            _host.Start();
 
             var uri = serverAddressesFeature!.Addresses.Select(address => new Uri(address)).First();
             var boundPort = uri.Port;
@@ -133,5 +143,12 @@ public class GrpcNetRemote : BaseGrpcNetRemote
                 await _host.StopAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             }
         }
+    }
+
+    private sealed class NoopHostLifetime : IHostLifetime
+    {
+        public Task WaitForStartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

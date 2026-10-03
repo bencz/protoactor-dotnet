@@ -81,7 +81,7 @@ public class HashRingTests
 
         var retainedRatio = retained / results.Count;
         retainedRatio.Should().BeLessThan(1d, "New nodes should affect the result");
-        retainedRatio.Should().BeGreaterOrEqualTo(expectedRetainedRatio);
+        retainedRatio.Should().BeGreaterThanOrEqualTo(expectedRetainedRatio);
     }
 
     [Theory]

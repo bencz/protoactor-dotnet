@@ -24,7 +24,7 @@
                 <MudCard Square>
                     <MudCardHeader>
                         <MudTextField Adornment="Adornment.Start"
-                                      AdornmentIcon="@Icons.Filled.Search"
+                                      AdornmentIcon="@Icons.Material.Filled.Search"
                                       Label="Search"
                                       Variant="Variant.Outlined"
                                       @bind-Value="_search"
@@ -35,12 +35,12 @@
 
                 <div Class="pa-2">
                     <MudPaper Outlined Elevation="2" Class="my-2" Style="max-height: 300px;overflow-y: scroll">
-                        <MudList Clickable="true" Dense>
+                        <MudList T="string" Dense>
                             @if (_pids != null)
                             {
                                 foreach (var pid in _pids)
                                 {
-                                    <MudListItem Text="@pid.Id" OnClick="() => ClickPid(pid)"/>
+                                    <MudListItem T="string" Text="@pid.Id" OnClick="() => ClickPid(pid)"/>
                                 }
                             }
                         </MudList>

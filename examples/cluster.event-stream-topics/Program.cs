@@ -9,7 +9,6 @@ using Proto.Cluster.Consul;
 using Proto.Cluster.Partition;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 
 namespace EventStreamTopicsCluster;
 

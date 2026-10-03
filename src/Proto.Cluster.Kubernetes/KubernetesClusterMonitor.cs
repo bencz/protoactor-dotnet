@@ -31,7 +31,6 @@ internal class KubernetesClusterMonitor : IActor
     private string _podName;
     private bool _stopping;
     private Watcher<V1Pod> _watcher;
-    private Task<HttpOperationResponse<V1PodList>> _watcherTask;
     private bool _watching;
 
     public KubernetesClusterMonitor(Cluster cluster, KubernetesProviderConfig config)
@@ -73,7 +72,6 @@ internal class KubernetesClusterMonitor : IActor
             _stopping = true;
 
             DisposeWatcher();
-            DisposeWatcherTask();
         }
 
         return Task.CompletedTask;
@@ -110,8 +108,19 @@ internal class KubernetesClusterMonitor : IActor
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _watcherTask = GetListTask(_clusterName, true, _config.WatchTimeoutSeconds);
-        _watcher = _watcherTask.Watch<V1Pod, V1PodList>(Watch, Error, Closed);
+        var selector = $"{LabelCluster}={_clusterName}";
+
+        Logger.Log(_config.DebugLogLevel, "[Cluster][KubernetesProvider] Starting to watch pods with {Selector}",
+            selector);
+
+        _watcher = _kubernetes.CoreV1.WatchListNamespacedPod(
+            KubernetesExtensions.GetKubeNamespace(),
+            labelSelector: selector,
+            timeoutSeconds: _config.WatchTimeoutSeconds,
+            onEvent: Watch,
+            onError: Error,
+            onClosed: Closed
+        );
         _watching = true;
 
         void Error(Exception ex)
@@ -147,7 +156,6 @@ internal class KubernetesClusterMonitor : IActor
             _watching = false;
 
             DisposeWatcher();
-            DisposeWatcherTask();
 
             tcs.SetResult();
         }
@@ -197,7 +205,6 @@ internal class KubernetesClusterMonitor : IActor
     private void RecreateKubernetesClient()
     {
         DisposeWatcher();
-        DisposeWatcherTask();
         DisposeKubernetesClient();
 
         Logger.LogWarning("[Cluster][KubernetesProvider] Recreating Kubernetes client due to connectivity error");
@@ -205,8 +212,6 @@ internal class KubernetesClusterMonitor : IActor
     }
 
     private void DisposeKubernetesClient() => TrySafeDispose(_kubernetes);
-
-    private void DisposeWatcherTask() => TrySafeDispose(_watcherTask);
 
     private void DisposeWatcher() => TrySafeDispose(_watcher);
 

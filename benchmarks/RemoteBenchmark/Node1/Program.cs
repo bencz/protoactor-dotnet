@@ -15,7 +15,6 @@ using Microsoft.Extensions.Logging;
 using Proto;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using ProtosReflection = Messages.ProtosReflection;
 
 class Program

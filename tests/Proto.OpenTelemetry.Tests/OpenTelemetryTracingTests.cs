@@ -13,7 +13,7 @@ namespace Proto.OpenTelemetry.Tests;
 
 public class OpenTelemetryTracingTests : IClassFixture<ActivityFixture>
 {
-    private static readonly Baggage TestBaggage = Baggage.Create(new Dictionary<string, string?>
+    private static readonly Baggage TestBaggage = Baggage.Create(new Dictionary<string, string>
     {
         {"baggageKey", "baggageValue"}
     });
@@ -251,7 +251,7 @@ public class OpenTelemetryTracingTests : IClassFixture<ActivityFixture>
             .Single(it => it.OperationName.Contains("Receive TraceMe", StringComparison.Ordinal));
 
         
-        receiveActivity.GetStatus().Should().Be(Status.Error);
+        receiveActivity.Status.Should().Be(ActivityStatusCode.Error);
         receiveActivity.Events.Should().HaveCount(1);
         receiveActivity.Events.Single().Tags.Where(tag => tag.Key.StartsWith("exception")).Should().NotBeEmpty();
     }

@@ -20,9 +20,10 @@ app.MapGet("/", async (Cluster cluster) =>
     var helloGrain = cluster.GetHelloGrain("MyGrain");
 
     var res = await helloGrain.SayHello(new HelloRequest(), CancellationTokens.FromSeconds(5));
-    Console.WriteLine(res.Message);
+    var message = res?.Message ?? "No response from grain";
+    Console.WriteLine(message);
 
-    return res.Message;
+    return message;
 });
 
 app.MapGet("/diagnostics", (ActorSystem system) =>

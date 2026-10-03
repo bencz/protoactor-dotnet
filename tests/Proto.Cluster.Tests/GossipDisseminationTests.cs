@@ -22,7 +22,7 @@ public class GossipDisseminationTests
 
         await source.Gossip.SetStateAsync("shared", new Int32Value { Value = 99 });
 
-        Int32Value? value = null;
+        Int32Value value = null;
         await AwaitConditionAsync(async () =>
         {
             var state = await target.Gossip.GetState<Int32Value>("shared");

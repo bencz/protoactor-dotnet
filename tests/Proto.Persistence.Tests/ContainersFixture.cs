@@ -10,17 +10,17 @@ public class ContainersFixture : IAsyncLifetime
 {
     private const int InitialState = 1;
 
-    private readonly PostgreSqlContainer _postgreSqlContainer = new PostgreSqlBuilder()
+    private readonly PostgreSqlContainer _postgreSqlContainer = new PostgreSqlBuilder("postgres:15.1")
         .WithDatabase("IntegrationTests")
         .WithUsername("postgres")
         .WithPassword("root")
         .WithCommand(new[] { "-c", "log_statement=all" })
         .Build();
 
-    readonly MsSqlContainer _msSqlContainer = new MsSqlBuilder()
+    readonly MsSqlContainer _msSqlContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04")
         .Build();
 
-    readonly MongoDbContainer _mongoDbContainer = new MongoDbBuilder()
+    readonly MongoDbContainer _mongoDbContainer = new MongoDbBuilder("mongo:6.0")
         .Build();
 
     public PostgreSqlContainer Postgres => _postgreSqlContainer;

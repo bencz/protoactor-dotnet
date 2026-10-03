@@ -22,10 +22,10 @@
     </MudCardHeader>
     <MudDivider DividerType="DividerType.Middle"/>
     <MudCardActions>
-        <MudChipSet>
+        <MudChipSet T="string">
             @foreach (var kind in Member.Kinds)
             {
-                <MudChip Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">@kind</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">@kind</MudChip>
             }
         </MudChipSet>
     </MudCardActions>

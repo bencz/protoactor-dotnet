@@ -16,7 +16,6 @@ using Proto.Cluster.SeedNode.Redis;
 using Proto.Context;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using StackExchange.Redis;
 using static System.Threading.Tasks.Task;
 using ProtosReflection = ClusterHelloWorld.Messages.ProtosReflection;

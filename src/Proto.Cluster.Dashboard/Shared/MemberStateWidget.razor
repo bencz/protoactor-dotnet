@@ -1,5 +1,5 @@
 @using Proto.Cluster.Gossip
-<MudList Clickable Dense>
+<MudList T="string" Dense>
     @foreach (var stateEntry in State.Values.OrderBy(v => v.Key))
     {
         <ExpanderButton Text="@($"State Key: {stateEntry.Key} - Version: {stateEntry.Value.SequenceNumber} - Updated: {stateEntry.Value.LocalTimestamp.ToString("yyyy-MM-dd hh:mm:ss")}")">

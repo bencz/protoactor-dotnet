@@ -4,14 +4,14 @@
 <PageTitle>Counter</PageTitle>
 <div class="px-4">
     <MudPaper Outlined>
-        <MudRadioGroup @bind-SelectedOption="@SelectedOption">
-            <MudRadio Option="@("1")" Color="Color.Primary">Group by Kind</MudRadio>
-            <MudRadio Option="@("2")" Color="Color.Secondary">Group by Member</MudRadio>
-            <MudRadio Option="@("3")" Color="Color.Tertiary">Aggregated</MudRadio>
+        <MudRadioGroup T="string" @bind-Value="@SelectedOption">
+            <MudRadio T="string" Value="@("1")" Color="Color.Primary">Group by Kind</MudRadio>
+            <MudRadio T="string" Value="@("2")" Color="Color.Secondary">Group by Member</MudRadio>
+            <MudRadio T="string" Value="@("3")" Color="Color.Tertiary">Aggregated</MudRadio>
         </MudRadioGroup>
     </MudPaper>
 
-    <MudChart ChartType="ChartType.Bar" LegendPosition="Position.Bottom" ChartSeries="@Series" XAxisLabels="@XAxisLabels.ToArray()" Width="100%" Height="350px">
+    <MudChart T="double" ChartType="ChartType.Bar" LegendPosition="Position.Bottom" ChartSeries="@Series" ChartLabels="@XAxisLabels.ToArray()" Width="100%" Height="350px">
         <CustomGraphics>
 
         </CustomGraphics>
@@ -20,7 +20,7 @@
 
 @code {
     private string SelectedOption = "1";
-    private readonly List<ChartSeries> Series = new();
+    private readonly List<ChartSeries<double>> Series = new();
     private readonly List<string> XAxisLabels = new();
 
     private readonly CancellationTokenSource _cts = new();
@@ -60,7 +60,7 @@
 
                     foreach (var series in statsByMember)
                     {
-                        Series.Add(new ChartSeries
+                        Series.Add(new ChartSeries<double>
                         {
                             Name = Trim(series.Key),
                             Data = series.Select(l => (double)l.Count).ToArray()
@@ -77,7 +77,7 @@
 
                     foreach (var series in statsByKind)
                     {
-                        Series.Add(new ChartSeries
+                        Series.Add(new ChartSeries<double>
                         {
                             Name = Trim(series.Key),
                             Data = series.Select(l => (double)l.Count).ToArray()
@@ -92,7 +92,7 @@
                         XAxisLabels.Add(label.Key);
                     }
 
-                    Series.Add(new ChartSeries
+                    Series.Add(new ChartSeries<double>
                     {
                         Name = "Aggregated",
                         Data = statsByKind.Select(series => series.Sum(l => (double)l.Count)).ToArray()

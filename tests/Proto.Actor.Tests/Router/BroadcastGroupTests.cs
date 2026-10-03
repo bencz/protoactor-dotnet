@@ -177,7 +177,7 @@ public class BroadcastGroupTests
                 return;
             }
 
-            context.Send(_probe.Self, context.Message);
+            context.Send(_probe.Self, context.Message!);
         }
     }
 }

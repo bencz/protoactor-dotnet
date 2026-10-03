@@ -374,7 +374,7 @@ public abstract class ClusterTests : ClusterTestBase
                     await task;
                 }
             }
-            catch (TimeoutException e)
+            catch (TimeoutException)
             {
                 _testOutputHelper.WriteLine("Got expected timeout after " + timer.ElapsedMilliseconds + "ms");
                 return;
@@ -392,7 +392,7 @@ public abstract class ClusterTests : ClusterTestBase
                 await task;
                 throw new Exception("RequestAsync ran until cancellation, we expected a timeout");
             }
-            catch (TimeoutException e)
+            catch (TimeoutException)
             {
                 throw new Exception("RequestAsync didn't timeout as expected");
             }

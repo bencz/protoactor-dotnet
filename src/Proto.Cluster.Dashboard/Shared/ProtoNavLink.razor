@@ -10,7 +10,7 @@
             <MudNavLink Href="@Href" Match="NavLinkMatch.Prefix" Icon="@Icon"></MudNavLink>
         </ActivatorContent>
         <ChildContent>
-            <MudMenuItem Href="@Href" Match="NavLinkMatch.Prefix">@ChildContent</MudMenuItem>
+            <MudMenuItem Href="@Href">@ChildContent</MudMenuItem>
         </ChildContent>
     </MudMenu>
 </div>
@@ -18,10 +18,10 @@
 @code {
 
     [Parameter]
-    public string Href { get; set; }
+    public string Href { get; set; } = null!;
 
     [Parameter]
-    public string Icon { get; set; }
+    public string Icon { get; set; } = null!;
 
     [Parameter]
     public RenderFragment? ChildContent { get; set; }

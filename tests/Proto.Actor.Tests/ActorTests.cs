@@ -181,7 +181,7 @@ public class ActorTests
         var pid = context.Spawn(
             Props.FromFunc(ctx =>
             {
-                ctx.Send(probePid, ctx.Message);
+                ctx.Send(probePid, ctx.Message!);
                 return Task.CompletedTask;
             })
         );
@@ -209,7 +209,7 @@ public class ActorTests
         var pid = context.Spawn(
             Props.FromFunc(async ctx =>
             {
-                ctx.Send(probePid, ctx.Message);
+                ctx.Send(probePid, ctx.Message!);
 
                 if (ctx.Message is string && i++ == 0)
                 {
@@ -266,7 +266,7 @@ public class ActorTests
                     }
                 }
 
-                ctx.Send(probePid, ctx.Message);
+                ctx.Send(probePid, ctx.Message!);
             })
         );
 

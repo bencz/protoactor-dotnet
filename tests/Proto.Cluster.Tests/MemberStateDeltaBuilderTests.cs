@@ -47,7 +47,7 @@ public class MemberStateDeltaBuilderTests
 
         var result = MemberStateDeltaBuilder.BuildOrdered(state, "target", ImmutableDictionary<string, long>.Empty, members, 3);
 
-        result.State.Members.Count.Should().BeLessOrEqualTo(3);
+        result.State.Members.Count.Should().BeLessThanOrEqualTo(3);
     }
 
     [Fact]

@@ -14,7 +14,6 @@ using Proto.Cluster.PartitionActivator;
 using Proto.Cluster.Seed;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using static System.Threading.Tasks.Task;
 using ProtosReflection = ClusterHelloWorld.Messages.ProtosReflection;
 

@@ -1,5 +1,5 @@
-<MudListItem @onclick="Toggle">
-    <MudIconButton @onclick="Toggle" Variant="Variant.Outlined" Color="Color.Info" Icon="@(Expanded ? Icons.Filled.ArrowDropDown : Icons.Filled.ArrowRight)">
+<MudListItem T="string" @onclick="Toggle">
+    <MudIconButton @onclick="Toggle" Variant="Variant.Outlined" Color="Color.Info" Icon="@(Expanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)">
     </MudIconButton>
 
     <span style="padding-left: 16px">

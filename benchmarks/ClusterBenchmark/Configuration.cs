@@ -55,7 +55,8 @@ public static class Configuration
                 .CreateTracerProviderBuilder()
                 .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("ClusterBenchmark"))
                 .AddProtoActorInstrumentation()
-                .AddJaegerExporter(options => options.AgentHost = "localhost")
+                // Jaeger ingests OTLP natively on 4317 (the dedicated Jaeger exporter is deprecated)
+                .AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"))
                 .Build();
         }
     }

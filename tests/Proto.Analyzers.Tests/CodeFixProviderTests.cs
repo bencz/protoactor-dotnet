@@ -17,7 +17,7 @@ public abstract class CodeFixProviderTests<TAnalyzer, TCodeFix> : AnalyzerTest<T
             TestCode = source,
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net60
+                ReferenceAssemblies = AssembliesUnderTest.ReferenceAssemblies
             },
             ExpectedDiagnostics =
             {

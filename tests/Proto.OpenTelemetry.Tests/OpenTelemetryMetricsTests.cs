@@ -54,7 +54,7 @@ public class OpenTelemetryMetricsTests : IAsyncLifetime
         await _cluster!.RequestAsync<Pong>("echo2", EchoActor.Kind, new Ping { Message = "hello" },
             CancellationToken.None);
 
-        _meterProvider.ForceFlush();
+        _meterProvider!.ForceFlush();
 
         var id = _cluster!.System.Id;
         var address = _cluster.System.Address;

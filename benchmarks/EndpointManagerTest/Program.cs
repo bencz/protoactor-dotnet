@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Proto;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 
 namespace EndpointManagerTest;
 
@@ -95,7 +94,6 @@ class Program
 		
 		sys1.EventStream.Publish(new EndpointTerminatedEvent(false, "localhost:12001", null));
 		
-		var port = 12002;
 		for (var i = 12002; i < 12032; i++)
 		{
 			//logger.LogInformation("Touching {i}", i);

@@ -22,7 +22,7 @@ public abstract class AnalyzerTest<TAnalyzer> where TAnalyzer : DiagnosticAnalyz
             TestState =
             {
                 Sources = { source },
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net60,
+                ReferenceAssemblies = AssembliesUnderTest.ReferenceAssemblies,
             }
         };
         test.TestState.ExpectedDiagnostics.AddRange(expected);
@@ -36,11 +36,11 @@ public abstract class AnalyzerTest<TAnalyzer> where TAnalyzer : DiagnosticAnalyz
 
     protected DiagnosticResult Diagnostic()
     {
-        return AnalyzerVerifier<TAnalyzer>.Diagnostic();
+        return CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic();
     }
 
     protected DiagnosticResult Diagnostic(DiagnosticDescriptor descriptor)
     {
-        return AnalyzerVerifier<TAnalyzer>.Diagnostic(descriptor);
+        return CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(descriptor);
     }
 }

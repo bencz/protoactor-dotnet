@@ -13,7 +13,6 @@ using Proto.Cluster.PartitionActivator;
 using Proto.Cluster.Seed;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using static Proto.CancellationTokens;
 using ProtosReflection = ClusterHelloWorld.Messages.ProtosReflection;
 

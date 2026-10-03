@@ -5,18 +5,14 @@
         <Nullable>enable</Nullable>
         <IsPackable>true</IsPackable>
         <LangVersion>10</LangVersion>
-        <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+        <TargetFramework>net10.0</TargetFramework>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Google.Protobuf" />
         <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
-        <PackageReference Include="System.Collections.Immutable" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-        <PackageReference Include="System.Diagnostics.DiagnosticSource" />
-        <PackageReference Include="System.Text.Json" />
-        <PackageReference Include="System.Threading.Channels" />
     </ItemGroup>
 
     <ItemGroup>

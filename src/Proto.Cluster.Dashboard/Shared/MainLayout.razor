@@ -34,8 +34,8 @@
         <h3>Proto.Actor Cluster Dashboard</h3>
         <MudSpacer/>
         <MudToggleIconButton @bind-Toggled="@_dark" Edge="Edge.End"
-                             Icon="@Icons.Material.Filled.DarkMode" Color="@Color.Info" Title="Dark"
-                             ToggledIcon="@Icons.Material.Filled.LightMode" ToggledColor="@Color.Warning" ToggledTitle="Light"/>
+                             Icon="@Icons.Material.Filled.DarkMode" Color="@Color.Info" title="@(_dark ? "Light" : "Dark")"
+                             ToggledIcon="@Icons.Material.Filled.LightMode" ToggledColor="@Color.Warning"/>
     </MudAppBar>
     <MudDrawer  ClipMode="DrawerClipMode.Never" Elevation="0" Variant="@DrawerVariant.Mini" OpenMiniOnHover="false">
         <NavMenu/>

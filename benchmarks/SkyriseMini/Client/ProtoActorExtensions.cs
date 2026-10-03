@@ -11,7 +11,6 @@ using Proto.Cluster.Partition;
 using Proto.DependencyInjection;
 using Proto.Remote;
 using Proto.Remote.GrpcNet;
-using Proto.Remote;
 using ProtoActorSut.Shared;
 using SkyriseMini.Tests;
 

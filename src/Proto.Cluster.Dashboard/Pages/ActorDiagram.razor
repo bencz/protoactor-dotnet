@@ -9,24 +9,24 @@
     @if (_root != null)
     {
         <MudPaper Elevation="2" Outlined>
-            <MudTreeView
-
+            <MudTreeView T="TreeNode"
                 Height="300px"
                 MaxHeight="300px"
                 ServerData="LoadServerData"
-                Items="_root.Children"
-                MultiSelection="false"
+                Items="_rootItems"
                 Hover="true"
                 SelectedValueChanged="(TreeNode node) => SelectedValueChanged(node)">
                 <ItemTemplate>
-                    <MudTreeViewItem
-                        Icon="@(context.Pid == null ? Icons.Material.Filled.Computer : Icons.Material.Filled.Circle)"
+                    <MudTreeViewItem T="TreeNode"
+                        Icon="@(context.Value?.Pid == null ? Icons.Material.Filled.Computer : Icons.Material.Filled.Circle)"
                         IconColor="Color.Success"
-                        Value="@context"
+                        Value="@context.Value"
+                        Items="@context.Children"
+                        CanExpand="@context.Expandable"
                         LoadingIconColor="Color.Info"
-                        EndText="@context.Pid?.ToString()"
+                        EndText="@context.Value?.Pid?.ToString()"
                         EndTextTypo="Typo.caption"
-                        Text="@context.Name"/>
+                        Text="@context.Text"/>
                 </ItemTemplate>
             </MudTreeView>
         </MudPaper>
@@ -37,8 +37,8 @@
         @if (Settings != null)
         {
             <MudPaper Elevation="2" class="my-4 pa-4" Outlined>
-                <MudButton Color="Color.Info" StartIcon="@Icons.Filled.TableRows" Variant="Variant.Filled" OnClick="OpenLogs">Logs for this actor</MudButton>
-                <MudButton Color="Color.Info" StartIcon="@Icons.Filled.AccountTree" Variant="Variant.Filled" OnClick="OpenTraces">Traces for this actor</MudButton>
+                <MudButton Color="Color.Info" StartIcon="@Icons.Material.Filled.TableRows" Variant="Variant.Filled" OnClick="OpenLogs">Logs for this actor</MudButton>
+                <MudButton Color="Color.Info" StartIcon="@Icons.Material.Filled.AccountTree" Variant="Variant.Filled" OnClick="OpenTraces">Traces for this actor</MudButton>
             </MudPaper>
         }
         <ActorDiagnosticsWidget PidId="@_selected.Pid.Id" Diagnostics="@_diagnostics"/>
@@ -55,6 +55,7 @@
 
 @code {
     private TreeNode? _root;
+    private IReadOnlyCollection<ITreeItemData<TreeNode>> _rootItems = Array.Empty<ITreeItemData<TreeNode>>();
     private TreeNode? _selected;
     private string? _diagnostics;
 
@@ -96,6 +97,7 @@
             var treeNode = root.GetChildFor(pid);
         }
         _root = root;
+        _rootItems = ToTreeItems(root.Children);
         await InvokeAsync(StateHasChanged).ConfigureAwait(false);
     }
 
@@ -119,7 +121,18 @@
         StateHasChanged();
     }
 
-    private Task<HashSet<TreeNode>> LoadServerData(TreeNode parentNode) => Task.FromResult(parentNode.Children);
+    private Task<IReadOnlyCollection<TreeItemData<TreeNode>>> LoadServerData(TreeNode parentNode) =>
+        Task.FromResult(ToTreeItems(parentNode.Children));
+
+    // Children are left unset so the tree view loads them lazily through ServerData
+    private static IReadOnlyCollection<TreeItemData<TreeNode>> ToTreeItems(IEnumerable<TreeNode> nodes) =>
+        nodes.Select(node => new TreeItemData<TreeNode>
+            {
+                Value = node,
+                Text = node.Name,
+                Expandable = node.Children.Count > 0
+            })
+            .ToList();
 
     private async Task OpenLogs()
     {

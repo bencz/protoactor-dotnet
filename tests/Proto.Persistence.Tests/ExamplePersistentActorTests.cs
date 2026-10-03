@@ -51,7 +51,7 @@ public class ExamplePersistentActorTests: IClassFixture<ContainersFixture>
         
                     BsonSerializer.RegisterSerializer(objectSerializer);
                 }
-                catch (BsonSerializationException e)
+                catch (BsonSerializationException)
                 {
                 }
                 return new MongoDBProvider(new MongoClient(_fixture.MongoDb.GetConnectionString())
@@ -444,13 +444,11 @@ internal class State
 public enum TestProvider
 {
     InMemory=1,
-    Couchbase=2,
     Marten=3,
     MongoDb=4,
     RavenDb=5,
     Sqlite=6,
-    SqlServer=7,
-    DynamoDb
+    SqlServer=7
 }
 internal class GetState
 {
