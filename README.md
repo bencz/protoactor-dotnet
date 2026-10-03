@@ -1,30 +1,57 @@
-### [💬 Join our Slack channel](https://join.slack.com/t/asynkron/shared_invite/zt-ko824601-yGN1d3GHF9jzZX2VtONodQ)
+# Proto.Actor (.NET) — bencz fork
 
-# Proto.Actor
+[![Build and test](https://github.com/bencz/protoactor-dotnet/actions/workflows/build-dev.yml/badge.svg?branch=dev)](https://github.com/bencz/protoactor-dotnet/actions/workflows/build-dev.yml)
 
 Ultra-fast, distributed, cross-platform actors.
 
-## Bootcamp Training
+This is a fork of [asynkron/protoactor-dotnet](https://github.com/asynkron/protoactor-dotnet), maintained at
+[https://github.com/bencz/protoactor-dotnet](https://github.com/bencz/protoactor-dotnet). It focuses on running virtual
+actors (grains) in scalable environments such as Kubernetes with autoscaling.
 
-[https://github.com/AsynkronIT/protoactor-bootcamp](https://github.com/AsynkronIT/protoactor-bootcamp)
+## Differences from upstream
 
-## Stats
-
-![Alt](https://repobeats.axiom.co/api/embed/c9c21a6a706eda331cc8a38e4f03a7a844ed95f3.svg "Repobeats analytics image")
+- **.NET 10 only** — all libraries, tests, examples and benchmarks target `net10.0`.
+- **PostgreSQL providers** — `Proto.Cluster.Identity.PostgreSql` (identity lookup storage) and
+  `Proto.Cluster.SeedNode.PostgreSql` (seed node discovery with expiring entries).
+- **Safer activations**
+  - An activation request that times out is retried against the same activator instead of another member, so a slow
+    member no longer leads to duplicate activations.
+  - A virtual actor whose `Started` handler fails is deactivated instead of restarted in a loop; the next request
+    activates it again.
+- **Identity storage cleanup** — leftovers of members that are gone (e.g. after the whole cluster was restarted) are
+  removed by a single member; Redis keeps a member registry instead of scanning the keyspace.
+- **Redis and MongoDB fixes**
+  - Redis seed entries expire unless refreshed (requires Redis/Valkey 7.4+), and removing a member no longer leaves
+    keys behind.
+  - MongoDB seed members can register concurrently, and the stale lock wait is configurable.
+- **Removed** — Couchbase and DynamoDB persistence, Amazon ECS and Azure Container Apps cluster providers.
+- **No NuGet packages** — this fork is not published to NuGet (see [Installing](#installing)).
 
 ## Installing
 
-Using NuGet Package Manager Console:
+The `Proto.*` packages on NuGet are the upstream releases, not this fork. To use the fork, reference its projects
+from source, for example as a git submodule:
 
-`PM> Install-Package Proto.Actor`
+```bash
+git submodule add https://github.com/bencz/protoactor-dotnet.git external/protoactor-dotnet
+```
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="external/protoactor-dotnet/src/Proto.Actor/Proto.Actor.csproj" />
+  <ProjectReference Include="external/protoactor-dotnet/src/Proto.Cluster/Proto.Cluster.csproj" />
+</ItemGroup>
+```
+
+Requires the .NET 10 SDK.
 
 ## Source code
 
-This is the .NET repository for Proto Actor.
+This is the .NET implementation of Proto Actor.
 
 Other implementations:
 
-- Go: [https://github.com/AsynkronIT/protoactor-go](https://github.com/AsynkronIT/protoactor-go)
+- Go: [https://github.com/asynkron/protoactor-go](https://github.com/asynkron/protoactor-go)
 
 ## Documentation
 
@@ -35,6 +62,8 @@ Additional root-level documents provide deeper insights into the project:
 - [EVENTSTREAM_EVENTS.md](EVENTSTREAM_EVENTS.md) – lists key EventStream events and their publishers/subscribers.
 - [SECURITY.md](SECURITY.md) – security policy and supported versions.
 - [Terminology.md](Terminology.md) – definitions of common Proto.Actor terms.
+
+The upstream [Proto.Actor documentation](https://proto.actor/docs/) also applies to this fork.
 
 ## Test coverage
 
@@ -97,7 +126,7 @@ Open the files in the `coveragereport` directory to inspect the results.
 
 ## Getting started
 
-The best place currently for learning how to use Proto.Actor is the [examples](https://github.com/AsynkronIT/protoactor-dotnet/tree/dev/examples). Documentation and guidance is under way, but not yet complete, and can be found on the [website](https://proto.actor/docs/).
+The best place for learning how to use Proto.Actor is the [examples](https://github.com/bencz/protoactor-dotnet/tree/dev/examples), together with the upstream [documentation](https://proto.actor/docs/).
 
 ### Hello world
 
@@ -137,21 +166,18 @@ context.Send(pid, new Hello("Alex"));
 
 You should see the output `Hello Alex`.
 
-## Sample application
-
-[https://github.com/asynkron/realtimemap-dotnet](https://github.com/asynkron/realtimemap-dotnet)
-
 ## Contributors
 
-<a href="https://github.com/asynkron/protoactor-dotnet/graphs/contributors">
-  <img src="https://contributors-img.web.app/image?repo=asynkron/protoactor-dotnet" />
+<a href="https://github.com/bencz/protoactor-dotnet/graphs/contributors">
+  <img src="https://contributors-img.web.app/image?repo=bencz/protoactor-dotnet" />
 </a>
 
 Made with [contributors-img](https://contributors-img.web.app).
 
-## Partners, Sponsors, and Contributor Companies
+## Acknowledgements
 
-<!-- make pretty with logos etc -->
+Proto.Actor was created by [Asynkron AB](https://asynkron.se) and its contributors; this fork builds on their work and
+keeps the original [Apache 2.0 license](LICENSE). Upstream partners, sponsors and contributor companies:
 
 | Name                                     | Role                                  |
 | ---------------------------------------- | ------------------------------------- |

@@ -22,6 +22,9 @@ public sealed class PostgreSqlIdentityStorage : IIdentityStorage
     private readonly PostgreSqlIdentityStorageOptions _options;
     private readonly PostgreSqlIdentitySql _sql;
 
+    /// <summary>
+    /// Create PgSql identity instance
+    /// </summary>
     /// <param name="clusterName">Name of the cluster; several clusters can share the same table</param>
     /// <param name="dataSource">PostgreSQL data source (connection pool)</param>
     /// <param name="options">Table location and lock behavior</param>

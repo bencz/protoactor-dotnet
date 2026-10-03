@@ -34,11 +34,10 @@
 
 ## Next Steps
 
-1. Run through the examples in `examples/HelloWorld`, followed by advanced scenarios such as `ClusterGrainHelloWorld` or `Persistence`.
+1. Run through the examples in `examples/actor.hello-world`, followed by advanced scenarios such as `examples/cluster.hello-world-grain` or `examples/persistence.basic`.
 2. Read test projects under `tests/` to see usage patterns and edge cases.
-3. Explore the [Proto Actor Bootcamp](https://proto.actor/docs/bootcamp/).
-4. Dive into modules like `Proto.Remote`, `Proto.Cluster`, or `Proto.Persistence` once the basics are clear.
-5. Browse the solution (`ProtoActor.sln`), run local tests, and check issues/PRs for current development.
+3. Dive into modules like `Proto.Remote`, `Proto.Cluster`, or `Proto.Persistence` once the basics are clear.
+4. Browse the solution (`ProtoActor.sln`), run local tests, and check issues/PRs for current development.
 
 ## Using Docker Compose for Tests and Examples
 
