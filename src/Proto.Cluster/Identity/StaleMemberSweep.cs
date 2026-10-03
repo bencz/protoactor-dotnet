@@ -22,4 +22,14 @@ internal static class StaleMemberSweep
         storedMemberIds
             .Where(memberId => !string.IsNullOrEmpty(memberId) && !isActiveMember(memberId))
             .ToImmutableHashSet();
+
+    /// <summary>
+    ///     Whether this member is the one that cleans up after members that are gone: the active member with the lowest
+    ///     id. Every member applies the same rule to the same topology, so normally only one member does the cleanup
+    ///     instead of all of them repeating the same work.
+    /// </summary>
+    /// <param name="selfId">Id of this member</param>
+    /// <param name="activeMemberIds">Ids of the active cluster members</param>
+    public static bool IsResponsibleForCleanup(string selfId, IEnumerable<string> activeMemberIds) =>
+        activeMemberIds.Min(StringComparer.Ordinal) == selfId;
 }

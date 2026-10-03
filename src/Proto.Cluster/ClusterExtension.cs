@@ -135,6 +135,8 @@ public static class Extensions
                             Started    => HandleStarted(baseReceive, ctx, env),
                             Restarting => HandleRestarting(baseReceive, ctx, env),
                             Stopped    => HandleStopped(baseReceive, ctx, env),
+                            Stopping   => baseReceive(ctx, env),
+                            _ when ctx.Get<FailedToStart>() is not null => RejectMessage(ctx, env),
                             _          => baseReceive(ctx, env)
                         };
                     }
@@ -151,12 +153,24 @@ public static class Extensions
             {
                 await baseReceive(ctx, startEnvelope).ConfigureAwait(false);
             }
-            catch
+            catch (Exception e)
             {
-                //if start fails, we need to decrement the counter
-                clusterKind.Dec();
-                throw;
+                // A virtual actor that cannot start is deactivated instead of restarted: restarting would run Started
+                // again and again in the background (a slow Started never hits the supervision retry window), while
+                // the requests waiting for it time out. Its pending and incoming requests get a DeadLetterResponse, so
+                // callers retry and the next request activates it again. Stopped decrements the counter.
+                e.CheckFailFast();
+                ctx.Set(FailedToStart.Instance);
+                Log.CreateLogger(typeof(Extensions).FullName!).ActivationFailedToStart(e, ctx.Self, ctx.Get<ClusterIdentity>());
+                ctx.Self.Stop(ctx.System);
             }
+        }
+
+        static Task RejectMessage(IReceiverContext ctx, MessageEnvelope envelope)
+        {
+            ctx.System.DeadLetter.SendUserMessage(ctx.Self, envelope);
+
+            return Task.CompletedTask;
         }
 
         async Task HandleRestarting(

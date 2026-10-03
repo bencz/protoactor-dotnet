@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,13 +16,29 @@ public sealed class MongoIdentityStorage : IIdentityStorage
     private readonly AsyncSemaphore _asyncSemaphore;
 
     private readonly string _clusterName;
+    private readonly TimeSpan _maxLockTime;
     private readonly IMongoCollection<PidLookupEntity> _pids;
 
-    public MongoIdentityStorage(string clusterName, IMongoCollection<PidLookupEntity> pids, int maxConcurrency = 50)
+    /// <param name="clusterName">Name of the cluster, used as key prefix</param>
+    /// <param name="pids">Collection that stores the activations</param>
+    /// <param name="maxConcurrency">Maximum number of concurrent operations against MongoDB</param>
+    /// <param name="maxWaitBeforeStaleLock">
+    ///     How long a member waits for another member's spawn lock before treating it as abandoned and removing it.
+    ///     The lock is held while the activation is spawned and stored, so this must comfortably exceed
+    ///     <see cref="ClusterConfig.ActorActivationTimeout" /> plus the MongoDB latency under load; a too short value
+    ///     removes locks that are still in use and causes a second activation. Defaults to 5 seconds.
+    /// </param>
+    public MongoIdentityStorage(
+        string clusterName,
+        IMongoCollection<PidLookupEntity> pids,
+        int maxConcurrency = 50,
+        TimeSpan? maxWaitBeforeStaleLock = null
+    )
     {
         _asyncSemaphore = new AsyncSemaphore(maxConcurrency);
         _clusterName = clusterName;
         _pids = pids;
+        _maxLockTime = maxWaitBeforeStaleLock ?? TimeSpan.FromSeconds(5);
     }
 
     public async Task<SpawnLock?> TryAcquireLock(
@@ -46,13 +63,16 @@ public sealed class MongoIdentityStorage : IIdentityStorage
 
         if (lockId != null)
         {
-            //There is an active lock on the pid, spin wait with incremental backoff
-            var i = 0;
+            //There is an active lock on the pid, spin wait with incremental backoff until the lock is considered stale
+            var timer = Stopwatch.StartNew();
+            var i = 1;
 
             do
             {
-                await Task.Delay(20 * i, ct).ConfigureAwait(false);
-            } while ((pidLookupEntity = await LookupKey(key, ct).ConfigureAwait(false))?.LockedBy == lockId && ++i < 10);
+                // Back off a little more on every check, capped so a released lock is noticed quickly
+                await Task.Delay(Math.Min(20 * i++, 200), ct).ConfigureAwait(false);
+            } while ((pidLookupEntity = await LookupKey(key, ct).ConfigureAwait(false))?.LockedBy == lockId &&
+                     timer.Elapsed < _maxLockTime);
         }
 
         //the lookup entity was lost, stale lock maybe?

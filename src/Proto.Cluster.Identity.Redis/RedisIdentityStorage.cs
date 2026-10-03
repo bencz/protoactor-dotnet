@@ -29,8 +29,11 @@ public sealed class RedisIdentityStorage : IIdentityStorage
     private const int RemoveMemberBatchSize = 500;
 
     // Pops a batch of activation keys from the member set and deletes the ones still owned by that member.
-    // SPOP shrinks the set on every batch, so an interrupted removal continues where it stopped.
+    // SPOP shrinks the set on every batch, so an interrupted removal continues where it stopped, and members removing
+    // the same member concurrently split the work instead of repeating it. Once the set is empty the member is dropped
+    // from the member registry.
     private const string RemoveMemberBatchScript = "local keys = redis.call('SPOP', KEYS[1], ARGV[2])\n" +
+                                                   "if #keys == 0 then redis.call('SREM', KEYS[2], ARGV[1]) return 0 end\n" +
                                                    "for _, key in ipairs(keys) do\n" +
                                                    " if redis.call('HGET', key, 'mid') == ARGV[1] then redis.call('DEL', key) end\n" +
                                                    "end\n" +
@@ -43,6 +46,12 @@ public sealed class RedisIdentityStorage : IIdentityStorage
     private readonly TimeSpan _maxLockTime;
     private readonly RedisKey _memberKey;
 
+    // Set of the ids of all members that own activations, so they can be listed without scanning the keyspace
+    private readonly RedisKey _membersKey;
+
+    // Marks that members stored before the registry existed were added to it (done once per cluster name)
+    private readonly RedisKey _membersBackfilledKey;
+
     public RedisIdentityStorage(
         string clusterName,
         IConnectionMultiplexer connections,
@@ -53,6 +62,8 @@ public sealed class RedisIdentityStorage : IIdentityStorage
         RedisKey baseKey = clusterName + ":";
         _clusterIdentityKey = baseKey.Append("ci:");
         _memberKey = baseKey.Append("mb:");
+        _membersKey = baseKey.Append("members");
+        _membersBackfilledKey = baseKey.Append("members-backfilled");
         _connections = connections;
         _maxLockTime = maxWaitBeforeStaleLock ?? TimeSpan.FromSeconds(5);
         _asyncSemaphore = new AsyncSemaphore(maxConcurrency);
@@ -156,6 +167,7 @@ public sealed class RedisIdentityStorage : IIdentityStorage
                     transaction.AddCondition(Condition.HashEqual(key, LockId, spawnLock.LockId));
                     _ = transaction.HashSetAsync(key, values, CommandFlags.DemandMaster);
                     _ = transaction.SetAddAsync(MemberKey(memberId), key.ToString());
+                    _ = transaction.SetAddAsync(_membersKey, memberId);
                     _ = transaction.KeyPersistAsync(key);
 
                     return transaction.ExecuteAsync();
@@ -203,7 +215,7 @@ public sealed class RedisIdentityStorage : IIdentityStorage
 
             var result = await _asyncSemaphore.WaitAsync(() => GetDb().ScriptEvaluateAsync(
                     RemoveMemberBatchScript,
-                    new[] { memberKey },
+                    new[] { memberKey, _membersKey },
                     new RedisValue[] { memberId, RemoveMemberBatchSize }
                 )
             ).ConfigureAwait(false);
@@ -214,15 +226,30 @@ public sealed class RedisIdentityStorage : IIdentityStorage
 
     public async Task<IReadOnlyCollection<string>> GetMemberIds(CancellationToken ct)
     {
+        var db = GetDb();
+
+        if (!await db.KeyExistsAsync(_membersBackfilledKey).ConfigureAwait(false))
+        {
+            await BackfillMemberRegistryAsync(db, ct).ConfigureAwait(false);
+        }
+
+        var memberIds = await db.SetMembersAsync(_membersKey).ConfigureAwait(false);
+
+        return memberIds.Select(memberId => memberId.ToString()).ToArray();
+    }
+
+    // Members stored by versions without the registry are only discoverable by scanning for their member sets.
+    // This runs once per cluster name; afterwards the registry is kept up to date by StoreActivation and RemoveMember.
+    private async Task BackfillMemberRegistryAsync(IDatabase db, CancellationToken ct)
+    {
         var prefix = _memberKey.ToString();
         var pattern = RedisPatterns.Escape(prefix) + "*";
-        var database = GetDb().Database;
-        var memberIds = new HashSet<string>();
+        var memberIds = new HashSet<RedisValue>();
 
         // Keys live on the primaries; SCAN is incremental, so this does not block the server like KEYS would
         foreach (var server in _connections.GetServers().Where(server => server.IsConnected && !server.IsReplica))
         {
-            await foreach (var key in server.KeysAsync(database, pattern, RemoveMemberBatchSize)
+            await foreach (var key in server.KeysAsync(db.Database, pattern, RemoveMemberBatchSize)
                                .WithCancellation(ct)
                                .ConfigureAwait(false))
             {
@@ -230,7 +257,12 @@ public sealed class RedisIdentityStorage : IIdentityStorage
             }
         }
 
-        return memberIds;
+        if (memberIds.Count > 0)
+        {
+            await db.SetAddAsync(_membersKey, memberIds.ToArray()).ConfigureAwait(false);
+        }
+
+        await db.StringSetAsync(_membersBackfilledKey, 1).ConfigureAwait(false);
     }
 
     public async Task<StoredActivation?> TryGetExistingActivation(

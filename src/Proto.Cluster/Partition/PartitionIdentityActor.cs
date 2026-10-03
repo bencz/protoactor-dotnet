@@ -36,6 +36,10 @@ internal class PartitionIdentityActor : IActor
         Dictionary<ClusterIdentity, (TaskCompletionSource<ActivationResponse> Response, string activationAddress)>
         _spawns = new();
 
+    // Activators that did not answer an activation request. The activation may still have been created there, so the
+    // next request for that identity goes to the same activator, which returns it instead of a second one being created
+    private readonly Dictionary<ClusterIdentity, string> _unresponsiveActivators = new();
+
     private HandoverSink? _currentHandover;
     private HashSet<string> _currentMemberAddresses = new();
     private ClusterTopology? _currentTopology;
@@ -341,6 +345,19 @@ internal class PartitionIdentityActor : IActor
             _partitionLookup.Remove(clusterIdentity);
             _memberStats.Dec(pid.Address);
         }
+
+        var obsoleteActivators = _unresponsiveActivators
+            .Where(kv => !members.Contains(kv.Value) ||
+                         !_memberHashRing.GetOwnerMemberByIdentity(kv.Key)
+                             .Equals(_myAddress, StringComparison.InvariantCultureIgnoreCase)
+            )
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var clusterIdentity in obsoleteActivators)
+        {
+            _unresponsiveActivators.Remove(clusterIdentity);
+        }
     }
 
     private void DiscardActivationsByMemberAddresses(HashSet<string> memberAddressesToRemove)
@@ -468,6 +485,8 @@ internal class PartitionIdentityActor : IActor
 
     private void TakeOverIdentity(ClusterIdentity clusterIdentity, PID activation, IContext context)
     {
+        _unresponsiveActivators.Remove(clusterIdentity);
+
         if (_partitionLookup.TryAdd(clusterIdentity, activation))
         {
             _memberStats.Inc(activation.Address);
@@ -580,7 +599,7 @@ internal class PartitionIdentityActor : IActor
         }
 
         //Get activator
-        var activatorAddress = _cluster.MemberList.GetActivator(msg.ClusterIdentity, context.Sender!.Address)?.Address;
+        var activatorAddress = GetActivatorAddress(msg, context);
 
         if (string.IsNullOrEmpty(activatorAddress))
         {
@@ -628,21 +647,47 @@ internal class PartitionIdentityActor : IActor
         //but other messages could have been processed in between
 
         //Await SpawningProcess
-        context.ReenterAfter(spawnResponse, OnSpawnResponse(msg, context, setResponse));
+        context.ReenterAfter(spawnResponse, OnSpawnResponse(msg, context, setResponse, activatorAddress));
 
         return Task.CompletedTask;
     }
 
-    private Func<Task<ActivationResponse>, Task> OnSpawnResponse(
+    private string? GetActivatorAddress(ActivationRequest msg, IContext context)
+    {
+        if (_unresponsiveActivators.TryGetValue(msg.ClusterIdentity, out var previousActivator))
+        {
+            if (_currentMemberAddresses.Contains(previousActivator))
+            {
+                return previousActivator;
+            }
+
+            _unresponsiveActivators.Remove(msg.ClusterIdentity);
+        }
+
+        return _cluster.MemberList.GetActivator(msg.ClusterIdentity, context.Sender!.Address)?.Address;
+    }
+
+    private Func<Task<SpawnOutcome>, Task> OnSpawnResponse(
         ActivationRequest msg,
         IContext context,
-        TaskCompletionSource<ActivationResponse> setResponse
+        TaskCompletionSource<ActivationResponse> setResponse,
+        string activatorAddress
     ) =>
         async rst =>
         {
             try
             {
-                var response = await rst.ConfigureAwait(false);
+                var (response, activatorUnresponsive) = await rst.ConfigureAwait(false);
+
+                if (activatorUnresponsive)
+                {
+                    Logger.ActivatorUnresponsive(msg.ClusterIdentity, activatorAddress);
+                    _unresponsiveActivators[msg.ClusterIdentity] = activatorAddress;
+                }
+                else
+                {
+                    _unresponsiveActivators.Remove(msg.ClusterIdentity);
+                }
 
                 if (_partitionLookup.TryGetValue(msg.ClusterIdentity, out var pid))
                 {
@@ -738,40 +783,63 @@ internal class PartitionIdentityActor : IActor
     private static void RespondWithFailure(IContext context) =>
         context.Respond(new ActivationResponse { Failed = true });
 
-    private async Task<ActivationResponse> SpawnRemoteActor(IContext context, ActivationRequest req,
+    private async Task<SpawnOutcome> SpawnRemoteActor(IContext context, ActivationRequest req,
         string activatorAddress)
     {
-        try
+        var timeout = _cluster.Config.ActorActivationTimeout;
+        var maxAttempts = Math.Max(1, _config.ActivationRequestAttempts);
+        var activatorPid = PartitionManager.RemotePartitionPlacementActor(activatorAddress);
+
+        for (var attempt = 1;; attempt++)
         {
-            if (Logger.IsEnabled(LogLevel.Trace))
+            try
             {
-                Logger.LogTrace("[PartitionIdentity] Spawning Remote Actor {Activator} {Identity} {Kind}",
-                    activatorAddress, req.Identity, req.Kind);
+                if (Logger.IsEnabled(LogLevel.Trace))
+                {
+                    Logger.LogTrace("[PartitionIdentity] Spawning Remote Actor {Activator} {Identity} {Kind}",
+                        activatorAddress, req.Identity, req.Kind);
+                }
+
+                if (context.System.Metrics.Enabled)
+                {
+                    IdentityMetrics.ActivationRequestSentCount.Add(1,
+                        new KeyValuePair<string, object?>("id", context.System.Id),
+                        new KeyValuePair<string, object?>("address", context.System.Address),
+                        new KeyValuePair<string, object?>("clusterkind", req.Kind));
+                }
+
+                var res = await context.RequestAsync<ActivationResponse>(activatorPid, req, timeout).ConfigureAwait(false);
+
+                return new SpawnOutcome(res, false);
             }
-
-            var timeout = _cluster.Config.ActorActivationTimeout;
-            var activatorPid = PartitionManager.RemotePartitionPlacementActor(activatorAddress);
-
-            if (context.System.Metrics.Enabled)
+            catch (TimeoutException)
             {
-                IdentityMetrics.ActivationRequestSentCount.Add(1,
-                    new KeyValuePair<string, object?>("id", context.System.Id),
-                    new KeyValuePair<string, object?>("address", context.System.Address),
-                    new KeyValuePair<string, object?>("clusterkind", req.Kind));
+                // The activator may be busy rather than gone: it could still create the activation after we stopped
+                // waiting. Asking it again is safe, it answers with the activation it created. Asking another member is
+                // not, that would create a second activation.
+                if (!IsMember(activatorAddress))
+                {
+                    return new SpawnOutcome(new ActivationResponse { Failed = true }, false);
+                }
+
+                if (attempt >= maxAttempts)
+                {
+                    return new SpawnOutcome(new ActivationResponse { Failed = true }, true);
+                }
+
+                Logger.ActivationRequestTimedOut(req.ClusterIdentity, activatorAddress, attempt, maxAttempts);
             }
-
-            var res = await context.RequestAsync<ActivationResponse>(activatorPid, req, timeout).ConfigureAwait(false);
-
-            return res;
-        }
-        catch
-        {
-            return new ActivationResponse
+            catch
             {
-                Failed = true
-            };
+                return new SpawnOutcome(new ActivationResponse { Failed = true }, false);
+            }
         }
     }
+
+    // Called outside the actor's message processing, so it reads the member list instead of the actor's state
+    private bool IsMember(string address) => _cluster.MemberList.GetAllMembers().Any(member => member.Address == address);
+
+    private readonly record struct SpawnOutcome(ActivationResponse Response, bool ActivatorUnresponsive);
 
     private class MemberStatistics
     {

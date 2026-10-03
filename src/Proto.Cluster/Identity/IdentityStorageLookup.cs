@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -76,6 +77,12 @@ public class IdentityStorageLookup : IIdentityLookup
         //hook up events
         cluster.System.EventStream.Subscribe<ClusterTopology>(e =>
             {
+                if (e.Left.Count == 0 ||
+                    !StaleMemberSweep.IsResponsibleForCleanup(_memberId, e.Members.Select(member => member.Id)))
+                {
+                    return;
+                }
+
                 //delete all members that have left from the lookup
                 foreach (var left in e.Left)
                     //YOLO. event stream is not async
@@ -128,6 +135,11 @@ public class IdentityStorageLookup : IIdentityLookup
         {
             await Cluster.JoinedCluster.WaitAsync(ct).ConfigureAwait(false);
             await MemberList.TopologyConsensus(ct).ConfigureAwait(false);
+
+            if (!StaleMemberSweep.IsResponsibleForCleanup(_memberId, MemberList.GetMembers()))
+            {
+                return;
+            }
 
             var storedMemberIds = await Storage.GetMemberIds(ct).ConfigureAwait(false);
             var candidates = StaleMemberSweep.FindStaleMembers(storedMemberIds, MemberList.ContainsMemberId);

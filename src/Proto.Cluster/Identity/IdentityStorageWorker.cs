@@ -331,8 +331,8 @@ internal class IdentityStorageWorker : IActor
             }
         }
 
-        //Clean up our mess..
-        await _storage.RemoveLock(spawnLock, ct).ConfigureAwait(false);
+        //Clean up our mess.. ct is usually the token that just timed out, the cleanup has to run regardless
+        await _storage.RemoveLock(spawnLock, CancellationToken.None).ConfigureAwait(false);
 
         return (null, null);
     }

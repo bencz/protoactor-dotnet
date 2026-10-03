@@ -45,9 +45,17 @@ public class DefaultClusterContext : IClusterContext
             i => Logger.LogInformation("Throttled {LogCount} TryRequestAsync logs", i)
         );
 
-        _requestTimeoutSeconds = (int)config.ActorRequestTimeout.TotalSeconds;
+        _requestTimeoutSeconds = GetRequestTimeoutSeconds(config.ActorRequestTimeout);
         _legacyTimeouts = config.LegacyRequestTimeoutBehavior;
     }
+
+    /// <summary>
+    ///     Request attempts use cached cancellation tokens with whole second granularity, so the configured timeout is
+    ///     rounded up to whole seconds, with a minimum of one second. Truncating instead would turn a sub-second timeout
+    ///     into zero, which cannot create a token and would resend the request in a tight loop.
+    /// </summary>
+    internal static int GetRequestTimeoutSeconds(TimeSpan actorRequestTimeout) =>
+        Math.Max(1, (int)Math.Ceiling(actorRequestTimeout.TotalSeconds));
 
     public async Task<T?> RequestAsync<T>(ClusterIdentity clusterIdentity, object message, ISenderContext context,
         CancellationToken ct)

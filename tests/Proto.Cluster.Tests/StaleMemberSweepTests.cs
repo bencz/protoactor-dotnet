@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Proto.Cluster.Identity;
 using Xunit;
+using static Proto.TestKit.TestKit;
 
 namespace Proto.Cluster.Tests;
 
@@ -29,6 +30,24 @@ public class StaleMemberSweepTests
     [Fact]
     public void FindsNothingWhenAllMembersAreActive() =>
         StaleMemberSweep.FindStaleMembers(new[] { "member-1" }, _ => true).Should().BeEmpty();
+
+    [Fact]
+    public void OnlyTheMemberWithTheLowestIdIsResponsibleForCleanup()
+    {
+        var members = new[] { "c-member", "a-member", "b-member" };
+
+        members.Where(member => StaleMemberSweep.IsResponsibleForCleanup(member, members))
+            .Should().Equal("a-member");
+    }
+
+    [Fact]
+    public void ResponsibilityUsesOrdinalOrdering() =>
+        // Ordinal ordering puts upper case before lower case; a culture-aware comparison would not
+        StaleMemberSweep.IsResponsibleForCleanup("B-member", new[] { "a-member", "B-member" }).Should().BeTrue();
+
+    [Fact]
+    public void NonMembersAreNeverResponsibleForCleanup() =>
+        StaleMemberSweep.IsResponsibleForCleanup("client", new[] { "a-member", "b-member" }).Should().BeFalse();
 }
 
 public class StaleMemberSweepClusterFixture : BaseInMemoryClusterFixture
@@ -58,9 +77,52 @@ public class IdentityStorageStaleMemberSweepTests : IClassFixture<StaleMemberSwe
     [Fact]
     public async Task RemovesActivationsOfMembersThatAreNotPartOfTheCluster()
     {
-        await _fixture.Storage.GhostRemoved.WaitAsync(TimeSpan.FromSeconds(10));
+        await AwaitConditionAsync(
+            () => _fixture.Storage.RemovedMembers.Contains(StaleMemberSweepClusterFixture.GhostMemberId),
+            TimeSpan.FromSeconds(10)
+        );
 
         _fixture.Storage.RemovedMembers.Should().Equal(StaleMemberSweepClusterFixture.GhostMemberId);
+    }
+}
+
+public class LeftMemberCleanupClusterFixture : BaseInMemoryClusterFixture
+{
+    public LeftMemberCleanupClusterFixture() : base(3)
+    {
+        Storage = new RecordingIdentityStorage(() => Members.Select(member => member.System.Id));
+    }
+
+    public RecordingIdentityStorage Storage { get; }
+
+    protected override IIdentityLookup GetIdentityLookup(string clusterName) => new IdentityStorageLookup(Storage);
+}
+
+public class LeftMemberCleanupTests : IClassFixture<LeftMemberCleanupClusterFixture>
+{
+    private readonly LeftMemberCleanupClusterFixture _fixture;
+
+    public LeftMemberCleanupTests(LeftMemberCleanupClusterFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task OnlyOneMemberRemovesTheActivationsOfAMemberThatLeft()
+    {
+        var leaving = _fixture.Members[^1];
+        var leavingId = leaving.System.Id;
+
+        // Not graceful: the member does not clean up after itself, so the remaining members have to
+        await _fixture.RemoveNode(leaving, false);
+        await _fixture.WaitForMemberAsync(leavingId, false);
+
+        await AwaitConditionAsync(() => _fixture.Storage.RemovedMembers.Contains(leavingId), TimeSpan.FromSeconds(10));
+
+        // Give the other remaining member time to handle the same topology change before counting the removals
+        await Task.Delay(500);
+
+        _fixture.Storage.RemovedMembers.Count(memberId => memberId == leavingId).Should().Be(1);
     }
 }
 
@@ -69,7 +131,6 @@ public class IdentityStorageStaleMemberSweepTests : IClassFixture<StaleMemberSwe
 /// </summary>
 public sealed class RecordingIdentityStorage : IIdentityStorage
 {
-    private readonly TaskCompletionSource _ghostRemoved = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentQueue<string> _removedMembers = new();
     private readonly Func<IEnumerable<string>> _storedMemberIds;
 
@@ -77,8 +138,6 @@ public sealed class RecordingIdentityStorage : IIdentityStorage
     {
         _storedMemberIds = storedMemberIds;
     }
-
-    public Task GhostRemoved => _ghostRemoved.Task;
 
     public IReadOnlyCollection<string> RemovedMembers => _removedMembers.ToArray();
 
@@ -88,11 +147,6 @@ public sealed class RecordingIdentityStorage : IIdentityStorage
     public Task RemoveMember(string memberId, CancellationToken ct)
     {
         _removedMembers.Enqueue(memberId);
-
-        if (memberId == StaleMemberSweepClusterFixture.GhostMemberId)
-        {
-            _ghostRemoved.TrySetResult();
-        }
 
         return Task.CompletedTask;
     }

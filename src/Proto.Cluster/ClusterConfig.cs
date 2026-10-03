@@ -94,12 +94,15 @@ public record ClusterConfig
     /// <summary>
     ///     Gossip heartbeat timeout. If the member does not update its heartbeat within this period, it will be added to the
     ///     <see cref="BlockList" />.
-    ///     Default is 20s. Set to <see cref="TimeSpan.Zero" /> to disable.
+    ///     Default is <see cref="TimeSpan.Zero" />, which disables it: a member that stops responding without leaving is
+    ///     then only removed when the cluster provider reports it gone. Set it (e.g. to 20s) to also block members whose
+    ///     heartbeat expired.
     /// </summary>
     public TimeSpan HeartbeatExpiration { get; set; }
 
     /// <summary>
-    ///     Timeout for single retry of actor request. Default is 5s.
+    ///     Timeout for single retry of actor request. Default is 5s. It is rounded up to whole seconds, with a minimum of
+    ///     one second.
     ///     Overall timeout for the request is controlled by the cancellation token on
     ///     <see cref="IClusterContext.RequestAsync{T}(ClusterIdentity, object, ISenderContext, CancellationToken)" />
     /// </summary>
@@ -186,7 +189,8 @@ public record ClusterConfig
     public bool ExitOnShutdown { get; set; } = false;
 
     /// <summary>
-    ///     Timeout for single retry of actor request. Default is 5s.
+    ///     Timeout for single retry of actor request. Default is 5s. It is rounded up to whole seconds, with a minimum of
+    ///     one second.
     ///     Overall timeout for the request is controlled by the cancellation token on
     ///     <see cref="IClusterContext.RequestAsync{T}(ClusterIdentity, object, ISenderContext, CancellationToken)" />
     /// </summary>
@@ -345,7 +349,9 @@ public record ClusterConfig
     /// <summary>
     ///     Gossip heartbeat timeout. If the member does not update its heartbeat within this period, it will be added to the
     ///     <see cref="BlockList" />.
-    ///     Default is 20s. Set to <see cref="TimeSpan.Zero" /> to disable.
+    ///     Default is <see cref="TimeSpan.Zero" />, which disables it: a member that stops responding without leaving is
+    ///     then only removed when the cluster provider reports it gone. Set it (e.g. to 20s) to also block members whose
+    ///     heartbeat expired.
     /// </summary>
     /// <param name="expiration"></param>
     /// <returns></returns>

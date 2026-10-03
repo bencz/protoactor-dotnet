@@ -91,6 +91,7 @@ public class MongoStorageTests : IdentityStorageTests
     }
 
     private static IIdentityStorage Init(string clusterName) => new MongoIdentityStorage(clusterName,
-        MongoFixture.Database.GetCollection<PidLookupEntity>("pids"));
+        MongoFixture.Database.GetCollection<PidLookupEntity>("pids"),
+        maxWaitBeforeStaleLock: TimeSpan.FromMilliseconds(1500));
 }
 
