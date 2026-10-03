@@ -21,7 +21,7 @@ public class RequestTimeoutTests
     [InlineData(1200, 2)]
     [InlineData(5000, 5)]
     public void RequestTimeoutIsRoundedUpToWholeSeconds(int milliseconds, int expectedSeconds) =>
-        DefaultClusterContext.GetRequestTimeoutSeconds(TimeSpan.FromMilliseconds(milliseconds))
+        ClusterTimeouts.ToWholeSeconds(TimeSpan.FromMilliseconds(milliseconds))
             .Should().Be(expectedSeconds);
 }
 

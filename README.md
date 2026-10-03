@@ -1,4 +1,4 @@
-# Proto.Actor (.NET) — bencz fork
+# Proto.Actor (.NET), bencz fork
 
 [![Build and test](https://github.com/bencz/protoactor-dotnet/actions/workflows/build-dev.yml/badge.svg?branch=dev)](https://github.com/bencz/protoactor-dotnet/actions/workflows/build-dev.yml)
 
@@ -10,22 +10,24 @@ actors (grains) in scalable environments such as Kubernetes with autoscaling.
 
 ## Differences from upstream
 
-- **.NET 10 only** — all libraries, tests, examples and benchmarks target `net10.0`.
-- **PostgreSQL providers** — `Proto.Cluster.Identity.PostgreSql` (identity lookup storage) and
+- **.NET 10 only**: all libraries, tests, examples and benchmarks target `net10.0`.
+- **PostgreSQL providers**: `Proto.Cluster.Identity.PostgreSql` (identity lookup storage) and
   `Proto.Cluster.SeedNode.PostgreSql` (seed node discovery with expiring entries).
 - **Safer activations**
   - An activation request that times out is retried against the same activator instead of another member, so a slow
     member no longer leads to duplicate activations.
   - A virtual actor whose `Started` handler fails is deactivated instead of restarted in a loop; the next request
     activates it again.
-- **Identity storage cleanup** — leftovers of members that are gone (e.g. after the whole cluster was restarted) are
+- **Identity storage cleanup**: leftovers of members that are gone (e.g. after the whole cluster was restarted) are
   removed by a single member; Redis keeps a member registry instead of scanning the keyspace.
 - **Redis and MongoDB fixes**
   - Redis seed entries expire unless refreshed (requires Redis/Valkey 7.4+), and removing a member no longer leaves
     keys behind.
   - MongoDB seed members can register concurrently, and the stale lock wait is configurable.
-- **Removed** — Couchbase and DynamoDB persistence, Amazon ECS and Azure Container Apps cluster providers.
-- **No NuGet packages** — this fork is not published to NuGet (see [Installing](#installing)).
+- **Removed**: Couchbase and DynamoDB persistence, Amazon ECS and Azure Container Apps cluster providers.
+- **No NuGet packages**: this fork is not published to NuGet (see [Installing](#installing)).
+
+See the [Virtual Actors Guide](VIRTUAL_ACTORS.md) and [Virtual actors in scalable environments](#virtual-actors-in-scalable-environments) for configuration guidance.
 
 ## Installing
 
@@ -57,11 +59,12 @@ Other implementations:
 
 Additional root-level documents provide deeper insights into the project:
 
-- [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) – overview of the repository structure and key concepts.
-- [CLUSTER_MEMBERSHIP_GOSSIP.md](CLUSTER_MEMBERSHIP_GOSSIP.md) – explains how cluster membership is detected and propagated via gossip.
-- [EVENTSTREAM_EVENTS.md](EVENTSTREAM_EVENTS.md) – lists key EventStream events and their publishers/subscribers.
-- [SECURITY.md](SECURITY.md) – security policy and supported versions.
-- [Terminology.md](Terminology.md) – definitions of common Proto.Actor terms.
+- [VIRTUAL_ACTORS.md](VIRTUAL_ACTORS.md): complete guide to building, configuring and operating virtual actors (grains).
+- [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md): overview of the repository structure and key concepts.
+- [CLUSTER_MEMBERSHIP_GOSSIP.md](CLUSTER_MEMBERSHIP_GOSSIP.md): explains how cluster membership is detected and propagated via gossip.
+- [EVENTSTREAM_EVENTS.md](EVENTSTREAM_EVENTS.md): lists key EventStream events and their publishers/subscribers.
+- [SECURITY.md](SECURITY.md): security policy and supported versions.
+- [Terminology.md](Terminology.md): definitions of common Proto.Actor terms.
 
 The upstream [Proto.Actor documentation](https://proto.actor/docs/) also applies to this fork.
 
@@ -166,13 +169,124 @@ context.Send(pid, new Hello("Alex"));
 
 You should see the output `Hello Alex`.
 
-## Contributors
+## Virtual actors in scalable environments
 
-<a href="https://github.com/bencz/protoactor-dotnet/graphs/contributors">
-  <img src="https://contributors-img.web.app/image?repo=bencz/protoactor-dotnet" />
-</a>
+Guidance for running virtual actors (grains) on Kubernetes with autoscaling (HPA), especially when a grain loads its
+state from a database in `Started`.
 
-Made with [contributors-img](https://contributors-img.web.app).
+This section is a summary; the [Virtual Actors Guide](VIRTUAL_ACTORS.md) covers grain design, configuration, hosting,
+Pub/Sub, testing and a review checklist in depth.
+
+### How an activation works
+
+- The first request for an identity spawns the grain and returns its PID right away; the activation does not wait for
+  `Started`.
+- `Started` always runs before any request reaches the grain. Requests sent meanwhile wait in its mailbox.
+- A slow `Started` therefore makes requests slower, never activations. Size `ActorRequestTimeout` for it, not
+  `ActorActivationTimeout`.
+- If `Started` throws, the grain is deactivated: pending and incoming requests get a `DeadLetterResponse`, callers
+  retry, and the next request activates it again. Nothing restarts in the background.
+
+### Choosing an identity lookup
+
+| Lookup | Where placements live | Use it when |
+|---|---|---|
+| `PartitionIdentityLookup` (default) | In memory, distributed over the members | Kubernetes and HPA. No database needed, fastest lookups. Recommended. |
+| `IdentityStorageLookup` with `RedisIdentityStorage`, `MongoIdentityStorage` or `PostgreSqlIdentityStorage` | In a database | Placements must outlive the members, or the database should be the single source of truth during topology changes. Adds a database round trip to every lookup that misses the PID cache. |
+| `PartitionActivatorLookup` | In memory, the owner is also the activator | Avoid with HPA and a slow `Started`: every scale event moves grains, and the old and new activation briefly run side by side. |
+
+### Recommended configuration (Partition lookup, HPA, slow `Started`)
+
+```csharp
+var clusterConfig = ClusterConfig
+    .Setup(clusterName, clusterProvider, new PartitionIdentityLookup(new PartitionConfig
+    {
+        // Longer than a rebalance (RebalanceActivationsCompletionTimeout plus the handover pull),
+        // so requests survive scale events instead of timing out
+        GetPidTimeout = TimeSpan.FromSeconds(15),
+
+        // At least ActivationRequestAttempts x ActorActivationTimeout,
+        // so a rebalance waits for activation requests that are still being retried
+        RebalanceActivationsCompletionTimeout = TimeSpan.FromSeconds(15),
+
+        // A timed out activation request is retried on the same member, which avoids duplicate activations
+        ActivationRequestAttempts = 2
+    }))
+    // Not affected by Started, which runs after the PID is returned
+    .WithActorActivationTimeout(TimeSpan.FromSeconds(5))
+    // Longer than the slowest Started plus the request handler; whole seconds, minimum 1 s
+    .WithActorRequestTimeout(TimeSpan.FromSeconds(25))
+    .WithClusterKind("user", Props.FromProducer(() => new UserGrain())
+        .WithClusterRequestDeduplication()
+        .WithStartDeadline(TimeSpan.FromSeconds(20)));
+```
+
+### Writing grains
+
+- **Load state with `await` in `Started`.** Do not use `ReenterAfter` there: the handler would return early and requests
+  would run before the state is loaded.
+- **Pass `context.CancellationToken` to database calls.** It is cancelled when the grain is stopped, for example on
+  scale-in, so a long load does not hold the shutdown.
+- **Expect requests to be delivered more than once.**
+  - The cluster resends a request after every `ActorRequestTimeout` until the caller's cancellation token expires.
+  - Make handlers idempotent, and add `.WithClusterRequestDeduplication()` to the grain props. Its window (default
+    1 minute) must be longer than the callers' total timeout.
+- **Use optimistic concurrency for persisted state** (a version or etag checked on write). No lookup can rule out two
+  activations of the same identity in every failure scenario, for example a network partition. A version check makes
+  the second writer fail instead of overwriting data.
+- **Give callers a cancellation token longer than the slowest `Started`**, e.g. 20 to 30 seconds.
+
+### Kubernetes
+
+- **`terminationGracePeriodSeconds`**
+  - On shutdown every grain is stopped and finishes the messages already queued for it.
+  - Grains are stopped 20 at a time, waiting up to 10 seconds per group, so allow at least
+    `ceil(grains per pod / 20) x 10` seconds, plus a few seconds to leave the cluster.
+- **HPA scale-down stabilization window** (`behavior.scaleDown.stabilizationWindowSeconds`). Fewer topology changes
+  mean fewer rebalances and fewer requests waiting for one.
+- **`ClusterConfig.WithHeartbeatExpiration(TimeSpan.FromSeconds(20))`.** Heartbeat expiration is disabled by default;
+  enable it to block members that stop responding without leaving, instead of waiting for the cluster provider to
+  notice.
+
+### Identity storage settings
+
+When using `IdentityStorageLookup`:
+
+- **Lock wait.** A member that finds an identity locked waits `maxWaitBeforeStaleLock` (default 5 seconds) before
+  treating the lock as abandoned. Keep it above `ActorActivationTimeout` plus the database latency under load, or locks
+  that are still in use get removed and the identity is activated twice. Configure it with
+  `new RedisIdentityStorage(clusterName, multiplexer, maxWaitBeforeStaleLock: ...)`,
+  `new MongoIdentityStorage(clusterName, collection, maxWaitBeforeStaleLock: ...)` or
+  `new PostgreSqlIdentityStorageOptions { MaxWaitBeforeStaleLock = ... }`.
+- **Cleanup.** When members leave, or after the whole cluster restarts, one member removes the placements owned by
+  members that are gone. Activations never expire on their own, so long-lived grains are safe.
+- **PostgreSQL schema.** The table and its indexes are created on startup. Set `CreateSchema = false` and apply
+  `PostgreSqlIdentityStorage.CreateSchemaSql()` through your migrations if the schema is managed separately.
+
+### Seed node discovery
+
+`SeedNodeClusterProvider.JoinWithDiscovery(...)` finds the first members to join through a shared store, as an
+alternative to the Kubernetes or Consul providers. After joining, membership is kept up to date by gossip.
+
+- **PostgreSQL** (`PostgreSqlSeedNodeDiscovery`, package `Proto.Cluster.SeedNode.PostgreSql`)
+  - Entries expire after `MemberTtl` (default 30 seconds) unless their member keeps refreshing them, so pods that die
+    without deregistering disappear on their own.
+  - Expiration uses the database clock, so clock differences between pods do not matter.
+  - Several clusters can share the table; entries are separated by cluster name.
+  - The table is created on first use; set `CreateSchema = false` and apply
+    `PostgreSqlSeedNodeDiscovery.CreateSchemaSql()` through your migrations if the schema is managed separately.
+- **Redis** (`RedisSeedNodeDiscovery`, package `Proto.Cluster.SeedNode.Redis`)
+  - Entries expire after `memberTtl` (default 30 seconds) unless refreshed, like PostgreSQL.
+  - Requires Redis or Valkey 7.4 or later (hash field expiration).
+- **MongoDB** (`MongoDbSeedNodeDiscovery`, package `Proto.Cluster.SeedNode.MongoDb`)
+  - Entries do not expire; they are removed on shutdown or when another member fails to connect to them.
+
+```csharp
+var dataSource = NpgsqlDataSource.Create(connectionString);
+
+var clusterProvider = SeedNodeClusterProvider.JoinWithDiscovery(
+    new PostgreSqlSeedNodeDiscovery(dataSource, clusterName));
+```
 
 ## Acknowledgements
 

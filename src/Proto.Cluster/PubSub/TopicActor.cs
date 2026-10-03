@@ -102,7 +102,20 @@ public sealed class TopicActor : IActor
 
             var pidTasks = _subscribers.Select(s => GetPid(context, s)).ToList();
             var subscribers = await Task.WhenAll(pidTasks).ConfigureAwait(false);
-            var members = subscribers.GroupBy(subscriber => subscriber.pid.Address);
+
+            // A subscriber that cannot be activated must not prevent delivery to the others
+            var unresolved = subscribers.Where(subscriber => subscriber.pid is null).ToArray();
+
+            if (unresolved.Length > 0 && LogThrottle().IsOpen())
+            {
+                Logger.UnresolvedSubscribers(_topic, unresolved.Length,
+                    string.Join(", ", unresolved.Select(subscriber => subscriber.subscriber.ToString())));
+            }
+
+            var members = subscribers
+                .Where(subscriber => subscriber.pid is not null)
+                .Select(subscriber => (subscriber.subscriber, pid: subscriber.pid!))
+                .GroupBy(subscriber => subscriber.pid.Address);
 
             var memberDeliveries =
                 from member in members
@@ -150,21 +163,35 @@ public sealed class TopicActor : IActor
             }
         };
 
-    private static Task<(SubscriberIdentity subscriber, PID pid)> GetPid(IContext context, SubscriberIdentity s) =>
+    private static Task<(SubscriberIdentity subscriber, PID? pid)> GetPid(IContext context, SubscriberIdentity s) =>
         s.IdentityCase switch
         {
-            SubscriberIdentity.IdentityOneofCase.Pid             => Task.FromResult((s, s.Pid)),
+            SubscriberIdentity.IdentityOneofCase.Pid             => Task.FromResult<(SubscriberIdentity, PID?)>((s, s.Pid)),
             SubscriberIdentity.IdentityOneofCase.ClusterIdentity => GetClusterIdentityPid(context, s),
             _                                                    => throw new ArgumentOutOfRangeException()
         };
 
-    private static async Task<(SubscriberIdentity, PID)> GetClusterIdentityPid(IContext context, SubscriberIdentity s)
+    private static async Task<(SubscriberIdentity, PID?)> GetClusterIdentityPid(IContext context, SubscriberIdentity s)
     {
-        // TODO: optimize with caching
-        var pid = await context.Cluster()
-            .GetAsync(s.ClusterIdentity.Identity, s.ClusterIdentity.Kind, CancellationToken.None).ConfigureAwait(false);
+        var cluster = context.Cluster();
 
-        return (s, pid!);
+        try
+        {
+            // TODO: optimize with caching
+            var pid = await cluster
+                .GetAsync(s.ClusterIdentity.Identity, s.ClusterIdentity.Kind,
+                    CancellationTokens.FromSeconds(ClusterTimeouts.ToWholeSeconds(cluster.Config.PubSubConfig.SubscriberTimeout)))
+                .ConfigureAwait(false);
+
+            return (s, pid);
+        }
+        catch (Exception e)
+        {
+            // e.g. the identity is blocked from activating or the lookup timed out
+            e.CheckFailFast();
+
+            return (s, null);
+        }
     }
 
     private async Task OnNotifyAboutFailingSubscribers(IContext context, NotifyAboutFailingSubscribersRequest msg)

@@ -65,7 +65,7 @@ public class PubSubBatchingProducerTests
     public async Task All_pending_tasks_complete_when_producer_fails()
     {
         var producer = new BatchingProducer(new MockPublisher(WaitThenFail), "topic",
-            new BatchingProducerConfig { BatchSize = 5 });
+            new BatchingProducerConfig { BatchSize = 5, OnPublishingError = PublishingErrorHandlers.FailBatchAndStop });
 
         var tasks = Enumerable.Range(1, 100).Select(i => producer.ProduceAsync(new TestMessage(i))).ToArray();
 
@@ -86,7 +86,7 @@ public class PubSubBatchingProducerTests
     public async Task Publishing_through_failed_producer_throws()
     {
         var producer = new BatchingProducer(new MockPublisher(Fail), "topic",
-            new BatchingProducerConfig { BatchSize = 10 });
+            new BatchingProducerConfig { BatchSize = 10, OnPublishingError = PublishingErrorHandlers.FailBatchAndStop });
         await using var _ = producer;
 
         var sutAction = () => producer.ProduceAsync(new TestMessage(1));
@@ -247,6 +247,54 @@ public class PubSubBatchingProducerTests
     }
 
     [Fact]
+    public async Task By_default_a_failed_publish_is_retried()
+    {
+        var attempts = 0;
+        var failTwice = CountAttempts(FailTimesThenSucceed(2), () => attempts++);
+        await using var producer =
+            new BatchingProducer(new MockPublisher(failTwice), "topic", new BatchingProducerConfig { BatchSize = 1 });
+
+        await producer.ProduceAsync(new TestMessage(1));
+
+        attempts.Should().Be(3, "the batch is published after failing twice");
+    }
+
+    [Fact]
+    public async Task By_default_the_producer_keeps_running_after_a_batch_fails()
+    {
+        // The first message fails the initial attempt and all 3 retries; publishing works again afterwards
+        await using var producer = new BatchingProducer(new MockPublisher(FailTimesThenRecord(4)), "topic",
+            new BatchingProducerConfig { BatchSize = 1 });
+
+        var failing = () => producer.ProduceAsync(new TestMessage(1));
+        await failing.Should().ThrowAsync<TestException>();
+
+        await producer.ProduceAsync(new TestMessage(2));
+
+        AllSentNumbers(_batchesSent).Should().Equal(2);
+    }
+
+    [Theory]
+    [InlineData(1, 100)]
+    [InlineData(2, 200)]
+    [InlineData(3, 400)]
+    public async Task Retry_policy_backs_off_exponentially(int retries, int expectedDelayMs)
+    {
+        var decision = await PublishingErrorHandlers.RetryThenFailBatch(3, TimeSpan.FromMilliseconds(100))(
+            retries, new TestException(), new PubSubBatch());
+
+        decision.Delay.Should().Be(TimeSpan.FromMilliseconds(expectedDelayMs));
+    }
+
+    [Fact]
+    public async Task Retry_policy_fails_the_batch_after_the_last_retry()
+    {
+        var decision = await PublishingErrorHandlers.RetryThenFailBatch(3)(4, new TestException(), new PubSubBatch());
+
+        decision.Should().BeSameAs(PublishingErrorDecision.FailBatchAndContinue);
+    }
+
+    [Fact]
     public async Task Can_handle_publish_timeouts()
     {
         await using var producer =
@@ -313,6 +361,22 @@ public class PubSubBatchingProducerTests
         return _ => times++ < numFails
             ? Task.FromException<PublishResponse>(new TestException())
             : Task.FromResult(new PublishResponse());
+    }
+
+    private static Func<PubSubBatch, Task<PublishResponse>> CountAttempts(
+        Func<PubSubBatch, Task<PublishResponse>> publish, Action onAttempt) =>
+        batch =>
+        {
+            onAttempt();
+
+            return publish(batch);
+        };
+
+    private Func<PubSubBatch, Task<PublishResponse>> FailTimesThenRecord(int numFails)
+    {
+        var times = 0;
+
+        return batch => times++ < numFails ? Task.FromException<PublishResponse>(new TestException()) : Record(batch);
     }
 
     private Task<PublishResponse> Timeout(PubSubBatch _) => Task.FromResult<PublishResponse>(null!);

@@ -22,6 +22,7 @@ public class PubSubClusterFixture : BaseInMemoryClusterFixture
 {
     public const string SubscriberKind = "Subscriber";
     public const string TimeoutSubscriberKind = "TimeoutSubscriber";
+    public const string BlockedSubscriberKind = "BlockedSubscriber";
 
     private readonly CancellationTokenSource _cts = new();
 
@@ -58,7 +59,10 @@ public class PubSubClusterFixture : BaseInMemoryClusterFixture
             var kinds = new List<ClusterKind>
             {
                 new(SubscriberKind, SubscriberProps()),
-                new(TimeoutSubscriberKind, TimeoutSubscriberProps())
+                new(TimeoutSubscriberKind, TimeoutSubscriberProps()),
+                // Its identities can never be activated
+                new ClusterKind(BlockedSubscriberKind, SubscriberProps())
+                    .WithSpawnPredicate((_, _) => ValueTask.FromResult(false))
             };
 
             if (!_useDefaultTopicRegistration)

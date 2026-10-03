@@ -46,11 +46,12 @@ public record BatchingProducerConfig
     public int PublishTimeoutInSeconds { get; init; } = 5;
 
     /// <summary>
-    ///     Error handler that can decide what to do with an error when publishing a batch. Default: Fail and stop the
-    ///     <see cref="BatchingProducer" />
+    ///     Error handler that can decide what to do with an error when publishing a batch. Default:
+    ///     <see cref="PublishingErrorHandlers.RetryThenFailBatch" /> (3 retries with exponential backoff, then the batch is
+    ///     failed and the producer keeps running). Use <see cref="PublishingErrorHandlers.FailBatchAndStop" /> to stop the
+    ///     producer on the first error.
     /// </summary>
-    public PublishingErrorHandler OnPublishingError { get; init; } =
-        (_, _, _) => Task.FromResult(PublishingErrorDecision.FailBatchAndStop);
+    public PublishingErrorHandler OnPublishingError { get; init; } = PublishingErrorHandlers.RetryThenFailBatch();
 
     /// <summary>
     ///     A throttle for logging from this producer. By default, a throttle shared between all instances of

@@ -276,6 +276,30 @@ public class PubSubTests : IClassFixture<PubSubClusterFixture>
         });
     }
 
+    [Fact]
+    public async Task Subscriber_that_cannot_be_activated_does_not_prevent_delivery_to_the_others()
+    {
+        await _fixture.Trace(async () =>
+        {
+            var subscriberIds = _fixture.SubscriberIds("unresolvable-test", 10);
+            const string topic = "unresolvable-test-topic";
+            const int numMessages = 10;
+
+            await _fixture.SubscribeAllTo(topic, subscriberIds);
+            await _fixture.SubscribeTo(topic, "never-activated", PubSubClusterFixture.BlockedSubscriberKind);
+
+            for (var i = 0; i < numMessages; i++)
+            {
+                var response = await _fixture.PublishData(topic, i);
+
+                response.Should().NotBeNull("publishing should not time out");
+                response!.Status.Should().Be(PublishStatus.Ok);
+            }
+
+            await _fixture.VerifyAllSubscribersGotAllTheData(subscriberIds, numMessages);
+        });
+    }
+
     [Fact(Skip = "Flaky")]
     [SuppressMessage("ReSharper", "AccessToDisposedClosure")]
     public async Task Can_publish_messages_via_batching_producer()

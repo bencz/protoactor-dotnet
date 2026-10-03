@@ -24,7 +24,7 @@ public class PubSubMemberDeliveryActor : IActor
 
     public PubSubMemberDeliveryActor(TimeSpan subscriberTimeout)
     {
-        _subscriberTimeoutSeconds = (int)subscriberTimeout.TotalSeconds;
+        _subscriberTimeoutSeconds = ClusterTimeouts.ToWholeSeconds(subscriberTimeout);
     }
 
     public Task ReceiveAsync(IContext context)
