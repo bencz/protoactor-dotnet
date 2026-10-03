@@ -15,4 +15,8 @@
       <ProjectReference Include="..\Proto.Cluster\Proto.Cluster.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="Proto.Cluster.MongoIdentity.Tests" />
+    </ItemGroup>
+
 </Project>

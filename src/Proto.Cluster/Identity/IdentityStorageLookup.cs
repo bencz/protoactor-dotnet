@@ -1,5 +1,7 @@
-﻿using System.Threading;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Proto.Cluster.Identity;
 
@@ -11,6 +13,14 @@ public class IdentityStorageLookup : IIdentityLookup
 {
     private const string WorkerActorName = "$identity-storage-worker";
     private const string PlacementActorName = "$placement-activator";
+
+    /// <summary>
+    ///     Default time a member waits before removing leftovers of members that are not part of the cluster.
+    /// </summary>
+    public static readonly TimeSpan DefaultStaleMemberSweepDelay = TimeSpan.FromSeconds(30);
+
+    private static readonly ILogger Logger = Log.CreateLogger<IdentityStorageLookup>();
+    private readonly TimeSpan _staleMemberSweepDelay;
     private bool _isClient;
     private string _memberId = string.Empty;
     private PID _placementActor = null!;
@@ -19,9 +29,20 @@ public class IdentityStorageLookup : IIdentityLookup
     internal Cluster Cluster = null!;
     internal MemberList MemberList = null!;
 
-    public IdentityStorageLookup(IIdentityStorage storage)
+    public IdentityStorageLookup(IIdentityStorage storage) : this(storage, DefaultStaleMemberSweepDelay)
+    {
+    }
+
+    /// <param name="storage">Storage for the activations</param>
+    /// <param name="staleMemberSweepDelay">
+    ///     After joining the cluster, each member looks for activations owned by members that are not part of the
+    ///     cluster (e.g. left behind when the whole cluster was stopped) and removes them after this delay. The delay gives
+    ///     members that are still joining time to show up in the topology.
+    /// </param>
+    public IdentityStorageLookup(IIdentityStorage storage, TimeSpan staleMemberSweepDelay)
     {
         Storage = storage;
+        _staleMemberSweepDelay = staleMemberSweepDelay;
     }
 
     internal IIdentityStorage Storage { get; }
@@ -71,6 +92,8 @@ public class IdentityStorageLookup : IIdentityLookup
 
         var props = Props.FromProducer(() => new IdentityStoragePlacementActor(Cluster, this));
         _placementActor = _system.Root.SpawnNamedSystem(props, PlacementActorName);
+
+        _ = SweepStaleMembersAsync();
     }
 
     public async Task ShutdownAsync()
@@ -96,6 +119,46 @@ public class IdentityStorageLookup : IIdentityLookup
     }
 
     internal Task RemoveMemberAsync(string memberId) => Storage.RemoveMember(memberId, CancellationToken.None);
+
+    private async Task SweepStaleMembersAsync()
+    {
+        var ct = _system.Shutdown;
+
+        try
+        {
+            await Cluster.JoinedCluster.WaitAsync(ct).ConfigureAwait(false);
+            await MemberList.TopologyConsensus(ct).ConfigureAwait(false);
+
+            var storedMemberIds = await Storage.GetMemberIds(ct).ConfigureAwait(false);
+            var candidates = StaleMemberSweep.FindStaleMembers(storedMemberIds, MemberList.ContainsMemberId);
+
+            if (candidates.IsEmpty)
+            {
+                return;
+            }
+
+            Logger.FoundStaleMembers(candidates.Count, _staleMemberSweepDelay);
+
+            // Grace period: members that are still joining get time to show up in this member's topology,
+            // so their activations are never mistaken for leftovers
+            await Task.Delay(_staleMemberSweepDelay, ct).ConfigureAwait(false);
+
+            foreach (var memberId in StaleMemberSweep.FindStaleMembers(candidates, MemberList.ContainsMemberId))
+            {
+                ct.ThrowIfCancellationRequested();
+                Logger.RemovingStaleMember(memberId);
+                await RemoveMemberAsync(memberId).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The system is shutting down, the next member to start will sweep instead
+        }
+        catch (Exception e)
+        {
+            Logger.StaleMemberSweepFailed(e);
+        }
+    }
 
     internal PID RemotePlacementActor(string address) => PID.FromAddress(address, PlacementActorName);
 }

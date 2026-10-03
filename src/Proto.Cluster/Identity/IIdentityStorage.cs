@@ -5,6 +5,7 @@
 // -----------------------------------------------------------------------
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -85,6 +86,17 @@ public interface IIdentityStorage : IDisposable
     /// <param name="ct">Token to cancel the operation</param>
     /// <returns></returns>
     public Task RemoveMember(string memberId, CancellationToken ct);
+
+    /// <summary>
+    ///     Returns the ids of all members that own activations in the storage. <see cref="IdentityStorageLookup" /> uses it
+    ///     to find leftovers of members that are no longer part of the cluster (e.g. after the whole cluster was restarted)
+    ///     and removes them with <see cref="RemoveMember" />.
+    ///     Storages that cannot enumerate members return an empty collection, which disables that cleanup.
+    /// </summary>
+    /// <param name="ct">Token to cancel the operation</param>
+    /// <returns>Ids of the members that own activations</returns>
+    public Task<IReadOnlyCollection<string>> GetMemberIds(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
 
     /// <summary>
     ///     Initialize the storage

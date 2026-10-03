@@ -1,49 +1,172 @@
-﻿using System.Linq;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
+using Microsoft.Extensions.Logging;
 using Proto.Cluster.Seed;
 using StackExchange.Redis;
 
 namespace Proto.Cluster.SeedNode.Redis;
 
+/// <summary>
+///     Stores the seed node members in a Redis hash. Every entry expires after <c>memberTtl</c> unless the member that
+///     registered it keeps refreshing it, so members that die without deregistering (crash, SIGKILL, lost node) disappear
+///     on their own.
+///     Requires Redis or Valkey 7.4+ (hash field expiration).
+/// </summary>
 [PublicAPI]
-public class RedisSeedNodeDiscovery : ISeedNodeDiscovery
+public class RedisSeedNodeDiscovery : ISeedNodeDiscovery, IDisposable
 {
-    private readonly string _storageKey;
-    private readonly IDatabase _db;
+    public static readonly TimeSpan DefaultMemberTtl = TimeSpan.FromSeconds(30);
 
-    public RedisSeedNodeDiscovery(IConnectionMultiplexer multiplexer, string storageKey = "RedisSeedNode")
+    private static readonly ILogger Logger = Log.CreateLogger<RedisSeedNodeDiscovery>();
+
+    private readonly IDatabase _db;
+    private readonly ConcurrentDictionary<string, Heartbeat> _heartbeats = new();
+    private readonly RedisKey _key;
+    private readonly TimeSpan _memberTtl;
+
+    /// <param name="multiplexer">Redis connection</param>
+    /// <param name="storageKey">Key of the hash that holds the members</param>
+    /// <param name="memberTtl">
+    ///     How long an entry survives without being refreshed. Registered members refresh their entry every third of
+    ///     this period. Defaults to <see cref="DefaultMemberTtl" />.
+    /// </param>
+    public RedisSeedNodeDiscovery(
+        IConnectionMultiplexer multiplexer,
+        string storageKey = "RedisSeedNode",
+        TimeSpan? memberTtl = null
+    )
     {
-        _storageKey = storageKey;
+        _key = storageKey;
         _db = multiplexer.GetDatabase();
+        _memberTtl = memberTtl ?? DefaultMemberTtl;
     }
+
     public async Task Register(string memberId, string host, int port)
-    { 
-        await _db.HashSetAsync(Key(), memberId, $"{host}:{port}");
+    {
+        await ExpireEntriesWithoutTtlAsync().ConfigureAwait(false);
+
+        RedisValue address = SeedNodeAddress.Format(host, port);
+        await WriteEntryAsync(memberId, address).ConfigureAwait(false);
+
+        var heartbeat = new Heartbeat();
+        heartbeat.Task = RefreshAsync(memberId, address, heartbeat.Cancellation.Token);
+
+        if (_heartbeats.TryRemove(memberId, out var previous))
+        {
+            await previous.StopAsync().ConfigureAwait(false);
+        }
+
+        _heartbeats[memberId] = heartbeat;
     }
 
     public async Task Remove(string memberId)
     {
-        await _db.HashDeleteAsync(Key(), memberId);
+        // Stop refreshing first, so an in-flight refresh cannot write the entry back after it was deleted
+        if (_heartbeats.TryRemove(memberId, out var heartbeat))
+        {
+            await heartbeat.StopAsync().ConfigureAwait(false);
+        }
+
+        await _db.HashDeleteAsync(_key, memberId).ConfigureAwait(false);
     }
 
     public async Task<(string memberId, string host, int port)[]> GetAll()
     {
-        var entries = await _db.HashGetAllAsync(Key());
-        var result = entries.Select(x =>
-        {
-            var parts = x.Value.ToString().Split(':');
-            var memberId = x.Name.ToString();
-            var host = parts[0];
-            var port = int.Parse(parts[1]);
-            return (memberId, host, port);
-        }).ToArray();
+        var entries = await _db.HashGetAllAsync(_key).ConfigureAwait(false);
+        var members = new List<(string memberId, string host, int port)>(entries.Length);
 
-        return result;
+        foreach (var entry in entries)
+        {
+            string memberId = entry.Name!;
+            string? address = entry.Value;
+
+            if (SeedNodeAddress.TryParse(address, out var host, out var port))
+            {
+                members.Add((memberId, host, port));
+            }
+            else
+            {
+                Logger.InvalidAddress(memberId, address);
+            }
+        }
+
+        return members.ToArray();
     }
 
-    private string Key()
+    /// <summary>
+    ///     Stops refreshing the registered members. Their entries expire after the configured TTL.
+    /// </summary>
+    public void Dispose()
     {
-        return _storageKey;
+        foreach (var memberId in _heartbeats.Keys)
+        {
+            if (_heartbeats.TryRemove(memberId, out var heartbeat))
+            {
+                heartbeat.Cancellation.Cancel();
+                heartbeat.Cancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private Task WriteEntryAsync(string memberId, RedisValue address)
+    {
+        var transaction = _db.CreateTransaction();
+        _ = transaction.HashSetAsync(_key, memberId, address);
+        _ = transaction.HashFieldExpireAsync(_key, new RedisValue[] { memberId }, _memberTtl);
+
+        return transaction.ExecuteAsync();
+    }
+
+    // Entries written by versions without expiration never go away on their own; give them a TTL so stale ones
+    // disappear. Entries that already expire (refreshed by live members) are left untouched.
+    private async Task ExpireEntriesWithoutTtlAsync()
+    {
+        var memberIds = await _db.HashKeysAsync(_key).ConfigureAwait(false);
+
+        if (memberIds.Length > 0)
+        {
+            await _db.HashFieldExpireAsync(_key, memberIds, _memberTtl, ExpireWhen.HasNoExpiry).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RefreshAsync(string memberId, RedisValue address, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                // Refresh well before the entry expires, so a single failed write does not drop the member
+                await Task.Delay(_memberTtl / 3, ct).ConfigureAwait(false);
+                await WriteEntryAsync(memberId, address).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e)
+            {
+                Logger.HeartbeatFailed(e, memberId);
+            }
+        }
+    }
+
+    private sealed class Heartbeat
+    {
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        public Task Task { get; set; } = Task.CompletedTask;
+
+        public async Task StopAsync()
+        {
+            Cancellation.Cancel();
+            await Task.ConfigureAwait(false);
+            Cancellation.Dispose();
+        }
     }
 }

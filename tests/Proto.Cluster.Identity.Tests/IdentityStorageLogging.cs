@@ -5,6 +5,7 @@
 // -----------------------------------------------------------------------
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -59,6 +60,11 @@ public sealed class IdentityStorageLogging : IIdentityStorage
     public Task RemoveMember(string memberId, CancellationToken ct) =>
         LogCall(() => _storage.RemoveMember(memberId, ct),
             nameof(RemoveMember), memberId
+        );
+
+    public Task<IReadOnlyCollection<string>> GetMemberIds(CancellationToken ct) =>
+        LogCall(() => _storage.GetMemberIds(ct),
+            nameof(GetMemberIds), ""
         );
 
     public Task Init() =>

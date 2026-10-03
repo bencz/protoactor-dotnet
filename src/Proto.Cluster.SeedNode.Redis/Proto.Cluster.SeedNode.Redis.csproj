@@ -16,4 +16,8 @@
       <PackageReference Include="StackExchange.Redis" />
     </ItemGroup>
 
+    <ItemGroup>
+      <InternalsVisibleTo Include="Proto.Cluster.RedisIdentity.Tests" />
+    </ItemGroup>
+
 </Project>

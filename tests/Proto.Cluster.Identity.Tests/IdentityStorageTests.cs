@@ -239,6 +239,7 @@ public abstract class IdentityStorageTests : IDisposable
 
     [Theory]
     [InlineData(200, 10000)]
+    [InlineData(1200, 30000)]
     public async Task CanRemoveMemberWithManyActivations(int activations, int msTimeout)
     {
         var identities = new List<ClusterIdentity>();
@@ -261,6 +262,25 @@ public abstract class IdentityStorageTests : IDisposable
             var storedActivation = await _storage.TryGetExistingActivation(clusterIdentity, timeout);
             storedActivation.Should().BeNull();
         }
+    }
+
+    [Fact]
+    public async Task ReturnsMembersThatOwnActivations()
+    {
+        var timeout = new CancellationTokenSource(TimeoutMs).Token;
+        var (activator, _, _) = await GetActivatedClusterIdentity(timeout);
+        var (otherActivator, _, _) = await GetActivatedClusterIdentity(timeout);
+
+        var memberIds = await _storage.GetMemberIds(timeout);
+
+        memberIds.Should().Contain(new[] { activator.Id, otherActivator.Id });
+
+        await _storage.RemoveMember(activator.Id, timeout);
+
+        var remaining = await _storage.GetMemberIds(timeout);
+
+        remaining.Should().NotContain(activator.Id);
+        remaining.Should().Contain(otherActivator.Id);
     }
 
     private async Task<(Member, ClusterIdentity, PID activation)> GetActivatedClusterIdentity(

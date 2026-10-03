@@ -12,31 +12,29 @@ public class MongoDbSeedNodeDiscovery : ISeedNodeDiscovery
         _collection = mongoDatabase.GetCollection<ProtoActorMember>(storageKey);
     }
 
-    public async Task Register(string memberId, string host, int port)
-    {
-        await _collection.InsertOneAsync(new ProtoActorMember
-        {
-            MemberId = memberId,
-            Host = host,
-            Port = port
-        });
-    }
+    public Task Register(string memberId, string host, int port) =>
+        _collection.ReplaceOneAsync(
+            SeedMemberFilters.ByMemberId(memberId),
+            new ProtoActorMember
+            {
+                MemberId = memberId,
+                Host = host,
+                Port = port
+            },
+            new ReplaceOptions { IsUpsert = true }
+        );
 
-    public async Task Remove(string memberId)
-    {
-        await _collection.DeleteOneAsync(x => x.MemberId == memberId);
-    }
+    public Task Remove(string memberId) => _collection.DeleteOneAsync(SeedMemberFilters.ByMemberId(memberId));
 
     public async Task<(string memberId, string host, int port)[]> GetAll()
     {
         var mongoResult = await _collection
-            .Find(_ => true)
-            .ToListAsync();
+            .Find(SeedMemberFilters.Registered)
+            .ToListAsync()
+            .ConfigureAwait(false);
 
-        var result = mongoResult
+        return mongoResult
             .Select(x => (x.MemberId, x.Host, x.Port))
             .ToArray();
-
-        return result;
     }
 }

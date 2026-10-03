@@ -5,6 +5,7 @@
 // -----------------------------------------------------------------------
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -23,6 +24,17 @@ public sealed class RedisIdentityStorage : IIdentityStorage
     private static readonly RedisValue Address = "adr";
     private static readonly RedisValue MemberId = "mid";
     private static readonly RedisValue LockId = "lid";
+
+    // Members can own many activations, so they are removed in batches to keep each script short
+    private const int RemoveMemberBatchSize = 500;
+
+    // Pops a batch of activation keys from the member set and deletes the ones still owned by that member.
+    // SPOP shrinks the set on every batch, so an interrupted removal continues where it stopped.
+    private const string RemoveMemberBatchScript = "local keys = redis.call('SPOP', KEYS[1], ARGV[2])\n" +
+                                                   "for _, key in ipairs(keys) do\n" +
+                                                   " if redis.call('HGET', key, 'mid') == ARGV[1] then redis.call('DEL', key) end\n" +
+                                                   "end\n" +
+                                                   "return #keys";
     private readonly AsyncSemaphore _asyncSemaphore;
 
     private readonly RedisKey _clusterIdentityKey;
@@ -159,7 +171,7 @@ public sealed class RedisIdentityStorage : IIdentityStorage
 
     public Task RemoveActivation(ClusterIdentity clusterIdentity, PID pid, CancellationToken ct)
     {
-        Logger.LogDebug("Removing activation: {ClusterIdentity} {@PID}", clusterIdentity, pid);
+        Logger.RemovingActivation(clusterIdentity, pid);
 
         const string removePid = "local pidEntry = redis.call('HMGET', KEYS[1], 'pid', 'adr', 'mid');\n" +
                                  "if pidEntry[1]~=ARGV[1] or pidEntry[2]~=ARGV[2] then return 0 end;\n" + // id / address matches
@@ -180,22 +192,45 @@ public sealed class RedisIdentityStorage : IIdentityStorage
         );
     }
 
-    public Task RemoveMember(string memberId, CancellationToken ct)
+    public async Task RemoveMember(string memberId, CancellationToken ct)
     {
         var memberKey = MemberKey(memberId);
-        RedisValue mVal = memberKey.ToString();
+        long popped;
 
-        const string removeMember = "local cursor = 0\n" +
-                                    "repeat\n" +
-                                    " local rep = redis.call('SSCAN', ARGV[1], cursor)\n" +
-                                    " if rep[2][1] == nil then break end" +
-                                    " cursor = rep[1]\n" +
-                                    " redis.call('DEL', unpack(rep[2]))\n" +
-                                    "until cursor == '0'\n" +
-                                    "redis.call('DEL', KEYS[1]);";
+        do
+        {
+            ct.ThrowIfCancellationRequested();
 
-        return _asyncSemaphore.WaitAsync(() =>
-            GetDb().ScriptEvaluateAsync(removeMember, new[] { memberKey }, new[] { mVal }));
+            var result = await _asyncSemaphore.WaitAsync(() => GetDb().ScriptEvaluateAsync(
+                    RemoveMemberBatchScript,
+                    new[] { memberKey },
+                    new RedisValue[] { memberId, RemoveMemberBatchSize }
+                )
+            ).ConfigureAwait(false);
+
+            popped = (long)result;
+        } while (popped > 0);
+    }
+
+    public async Task<IReadOnlyCollection<string>> GetMemberIds(CancellationToken ct)
+    {
+        var prefix = _memberKey.ToString();
+        var pattern = RedisPatterns.Escape(prefix) + "*";
+        var database = GetDb().Database;
+        var memberIds = new HashSet<string>();
+
+        // Keys live on the primaries; SCAN is incremental, so this does not block the server like KEYS would
+        foreach (var server in _connections.GetServers().Where(server => server.IsConnected && !server.IsReplica))
+        {
+            await foreach (var key in server.KeysAsync(database, pattern, RemoveMemberBatchSize)
+                               .WithCancellation(ct)
+                               .ConfigureAwait(false))
+            {
+                memberIds.Add(key.ToString()[prefix.Length..]);
+            }
+        }
+
+        return memberIds;
     }
 
     public async Task<StoredActivation?> TryGetExistingActivation(

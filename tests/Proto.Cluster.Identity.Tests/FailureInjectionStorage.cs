@@ -1,5 +1,6 @@
 ﻿#nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -66,6 +67,9 @@ public sealed class FailureInjectionStorage : IIdentityStorage
 
     public Task RemoveMember(string memberId, CancellationToken ct) =>
         _identityStorageImplementation.RemoveMember(memberId, ct);
+
+    public Task<IReadOnlyCollection<string>> GetMemberIds(CancellationToken ct) =>
+        _identityStorageImplementation.GetMemberIds(ct);
 
     public Task Init() => _identityStorageImplementation.Init();
 
