@@ -16,6 +16,7 @@ public class TestProvider : IClusterProvider
 {
     private static readonly ILogger Logger = Log.CreateLogger<TestProvider>();
     private readonly InMemAgent _agent;
+    private readonly object _notifyLock = new();
     private readonly TestProviderOptions _options;
 
     private string _id;
@@ -75,6 +76,17 @@ public class TestProvider : IClusterProvider
     private void AgentOnStatusUpdate(object sender, EventArgs e) => NotifyStatuses();
 
     private void NotifyStatuses()
+    {
+        // Status updates are raised on the thread of whichever member registers. Reading the snapshot and applying it
+        // must not interleave with another update, otherwise an older snapshot can be applied after a newer one and
+        // the member list sees a joined member as left, which blocks it for good.
+        lock (_notifyLock)
+        {
+            ApplyStatuses();
+        }
+    }
+
+    private void ApplyStatuses()
     {
         var statuses = _agent.GetServicesHealth();
 

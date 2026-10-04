@@ -92,3 +92,11 @@ System.Exception : Failed to reach consensus
    at Proto.Cluster.Tests.ClusterFixture.InitializeAsync() in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 126
 ```
 Same failure on the GitHub Actions runner (2 vCPU): all 23 tests of the chaos fixture failed, 47 others passed.
+
+### Proto.Cluster.MongoIdentity.Tests.ChaosMongoIdentityClusterFixture (class fixture initialization, CI, MongoDB 9.0.2)
+```
+System.Exception : Failed to reach consensus
+   at Proto.Cluster.Tests.ClusterFixture.SpawnClusterNodes(Int32 count, Func`2 configure) in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 322
+   at Proto.Cluster.Tests.ClusterFixture.InitializeAsync() in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 126
+```
+Root cause found (the earlier "unrelated, flaky under load" notes above were wrong): a race in `TestProvider.NotifyStatuses`. The in-memory agent raises status updates on the thread of whichever member registers, and the provider read the member snapshot and applied it without mutual exclusion. A thread holding an older snapshot (2 members) could apply it after another thread applied the newer one (3 members), so the member list saw a joined member as left and blocked it permanently (`I have been blocked, exiting`), and consensus was never reached. Both Mongo cluster fixtures were affected, also when run alone. Fixed by serializing snapshot read and apply per provider. Pinned to 2 cores against MongoDB 9: before the fix 4/8 runs failed, each failing run logged a blocked member; after the fix 12/12 passed with no blocked member. Test infrastructure only; upstream had the same code but never ran the Mongo tests in CI.
