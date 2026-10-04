@@ -99,3 +99,59 @@ public class StartCountingActor : IActor
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+///     While an asynchronous spawn check is running, the activator answers further requests for the same identity with a
+///     failure. The identity owner must keep sending them to that activator instead of activating the identity elsewhere.
+/// </summary>
+public class SlowSpawnCheckTests : IClassFixture<SlowSpawnCheckClusterFixture>
+{
+    private readonly SlowSpawnCheckClusterFixture _fixture;
+
+    public SlowSpawnCheckTests(SlowSpawnCheckClusterFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task SlowSpawnCheckDoesNotCreateASecondActivation()
+    {
+        var identity = $"slow-check-{Guid.NewGuid():N}";
+
+        var pong = await _fixture.Members[0].RequestAsync<Pong>(identity, SlowSpawnCheckClusterFixture.Kind,
+            new Ping { Message = "hello" }, new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token);
+
+        pong.Should().NotBeNull();
+
+        // Spawn checks still running on other members complete by now
+        await Task.Delay(SlowSpawnCheckClusterFixture.SpawnCheckDuration * 2);
+
+        StartCountingActor.Starts.GetValueOrDefault(identity).Should().Be(1);
+    }
+}
+
+public class SlowSpawnCheckClusterFixture : BaseInMemoryClusterFixture
+{
+    public const string Kind = "slow-spawn-check";
+
+    // Longer than the activation timeout, so the identity owner stops waiting while the check is still running
+    public static readonly TimeSpan SpawnCheckDuration = TimeSpan.FromSeconds(1.5);
+
+    public SlowSpawnCheckClusterFixture() : base(3,
+        config => config.WithActorActivationTimeout(SlowActivatorClusterFixture.ActivationTimeout))
+    {
+    }
+
+    protected override ClusterKind[] ClusterKinds =>
+        new[]
+        {
+            new ClusterKind(Kind, Props.FromProducer(() => new StartCountingActor()))
+                .WithSpawnPredicate(async (_, _) =>
+                {
+                    // Simulates a spawn check that queries a slow database
+                    await Task.Delay(SpawnCheckDuration);
+
+                    return true;
+                })
+        };
+}

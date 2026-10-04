@@ -64,6 +64,15 @@ public class MongoMappingTests
                 { "LockedBy", "lock-1" }
             });
 
+    [Fact]
+    public void MemberLookupIsScopedToTheCluster() =>
+        Render(PidLookupFilters.ClusterMembers("orders.prod"))
+            .Should().Equal(new BsonDocument
+            {
+                { "_id", new BsonRegularExpression("^orders\\.prod/") },
+                { "MemberId", new BsonDocument("$ne", BsonNull.Value) }
+            });
+
     private static BsonDocument Render<T>(FilterDefinition<T> filter) =>
         filter.Render(new RenderArgs<T>(BsonSerializer.LookupSerializer<T>(), BsonSerializer.SerializerRegistry));
 }

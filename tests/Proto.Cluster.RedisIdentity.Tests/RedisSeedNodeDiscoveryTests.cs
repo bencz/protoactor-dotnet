@@ -124,20 +124,22 @@ public sealed class RedisSeedNodeDiscoveryTests : IDisposable
     }
 
     [Fact]
-    public async Task EntriesWrittenWithoutExpirationExpireAfterTheNextRegistration()
+    public async Task EntriesOfOtherWritersAreNotTouched()
     {
-        // Written the way versions without expiration stored members
-        await RedisFixture.Multiplexer.GetDatabase().HashSetAsync(_storageKey, "legacy-member", "10.0.0.1:4020");
+        // An entry without expiration, as written by another application or an older version sharing the hash
+        await RedisFixture.Multiplexer.GetDatabase().HashSetAsync(_storageKey, "other-member", "10.0.0.1:4020");
 
         await _discovery.Register("member-2", "10.0.0.2", 4020);
 
-        await AwaitConditionAsync(
-            async () => (await _discovery.GetAll()).All(member => member.memberId != "legacy-member"),
-            WaitTimeout
-        );
+        // Wait for several TTL periods of this discovery
+        await Task.Delay(ShortTtl * 3);
 
         var members = await _discovery.GetAll();
-        members.Should().BeEquivalentTo(new[] { ("member-2", "10.0.0.2", 4020) });
+        members.Should().BeEquivalentTo(new[]
+        {
+            ("other-member", "10.0.0.1", 4020),
+            ("member-2", "10.0.0.2", 4020)
+        });
     }
 
     [Fact]

@@ -135,6 +135,8 @@ public static class Extensions
                             Started    => HandleStarted(baseReceive, ctx, env),
                             Restarting => HandleRestarting(baseReceive, ctx, env),
                             Stopped    => HandleStopped(baseReceive, ctx, env),
+                            // A grain that failed to start has no state to clean up or save
+                            Stopping when ctx.Get<FailedToStart>() is not null => Task.CompletedTask,
                             Stopping   => baseReceive(ctx, env),
                             _ when ctx.Get<FailedToStart>() is not null => RejectMessage(ctx, env),
                             _          => baseReceive(ctx, env)
@@ -210,7 +212,11 @@ public static class Extensions
                 cluster.PidCache.RemoveByVal(identity, ctx.Self);
             }
 
-            await baseReceive(ctx, stopEnvelope).ConfigureAwait(false);
+            // A grain that failed to start has no state to clean up or save
+            if (ctx.Get<FailedToStart>() is null)
+            {
+                await baseReceive(ctx, stopEnvelope).ConfigureAwait(false);
+            }
         }
     }
 

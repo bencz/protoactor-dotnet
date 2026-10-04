@@ -24,9 +24,9 @@ public sealed record PostgreSqlIdentityStorageOptions
     ///     How long a member waits for another member's spawn lock before treating it as abandoned and removing it.
     ///     The lock is held while the activation is spawned and stored, so this must comfortably exceed
     ///     <see cref="ClusterConfig.ActorActivationTimeout" /> plus the database latency under load; a too short value
-    ///     removes locks that are still in use and causes a second activation. Default is 5 seconds.
+    ///     removes locks that are still in use and causes a second activation. Default is 10 seconds.
     /// </summary>
-    public TimeSpan MaxWaitBeforeStaleLock { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan MaxWaitBeforeStaleLock { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     ///     Maximum number of concurrent database operations per member. Default is 50.

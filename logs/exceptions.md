@@ -84,3 +84,11 @@ System.Exception : Failed to reach consensus
    at Proto.Cluster.Tests.ClusterFixture.SpawnClusterNodes(Int32 count, Func`2 configure) in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 323
 ```
 All 23 tests of the fixture failed in 1 ms because the 3-member test cluster did not reach gossip topology consensus while starting (first run right after a build, many fixtures starting in parallel). Unrelated to MongoDB; the next two runs passed 70/70.
+
+### Proto.Cluster.MongoIdentity.Tests.ChaosMongoIdentityClusterFixture (class fixture initialization, CI)
+```
+System.Exception : Failed to reach consensus
+   at Proto.Cluster.Tests.ClusterFixture.SpawnClusterNodes(Int32 count, Func`2 configure) in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 322
+   at Proto.Cluster.Tests.ClusterFixture.InitializeAsync() in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 126
+```
+Same failure on the GitHub Actions runner (2 vCPU): all 23 tests of the chaos fixture failed, 47 others passed.

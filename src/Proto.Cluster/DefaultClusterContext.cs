@@ -145,6 +145,13 @@ public class DefaultClusterContext : IClusterContext
                             RefreshFuture();
                             await RemoveFromSource(clusterIdentity, PidSource.Lookup, pid).ConfigureAwait(false);
 
+                            if (i > 1)
+                            {
+                                // Repeated dead letters usually mean the grain keeps failing to start: back off so the
+                                // retries do not hammer whatever its start depends on. The first retry is immediate.
+                                await Task.Delay(i * 20, CancellationToken.None).ConfigureAwait(false);
+                            }
+
                             continue;
                         }
                         

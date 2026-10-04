@@ -185,7 +185,8 @@ Pub/Sub, testing and a review checklist in depth.
 - A slow `Started` therefore makes requests slower, never activations. Size `ActorRequestTimeout` for it, not
   `ActorActivationTimeout`.
 - If `Started` throws, the grain is deactivated: pending and incoming requests get a `DeadLetterResponse`, callers
-  retry, and the next request activates it again. Nothing restarts in the background.
+  retry, and the next request activates it again. Nothing restarts in the background, and `Stopping`/`Stopped` are not
+  delivered to the grain, since it never started.
 
 ### Choosing an identity lookup
 
@@ -252,14 +253,21 @@ var clusterConfig = ClusterConfig
 
 When using `IdentityStorageLookup`:
 
-- **Lock wait.** A member that finds an identity locked waits `maxWaitBeforeStaleLock` (default 5 seconds) before
-  treating the lock as abandoned. Keep it above `ActorActivationTimeout` plus the database latency under load, or locks
-  that are still in use get removed and the identity is activated twice. Configure it with
+- **Lock wait.** A lock older than `maxWaitBeforeStaleLock` is treated as abandoned and removed by the next member
+  that finds it (default 5 seconds for Redis, where the lock also expires on its own, and 10 seconds for MongoDB and
+  PostgreSQL). The age is measured with the database clock. Keep it above `ActorActivationTimeout` plus the database
+  latency under load, or locks that are still in use get removed and the identity is activated twice. Configure it with
   `new RedisIdentityStorage(clusterName, multiplexer, maxWaitBeforeStaleLock: ...)`,
   `new MongoIdentityStorage(clusterName, collection, maxWaitBeforeStaleLock: ...)` or
   `new PostgreSqlIdentityStorageOptions { MaxWaitBeforeStaleLock = ... }`.
 - **Cleanup.** When members leave, or after the whole cluster restarts, one member removes the placements owned by
   members that are gone. Activations never expire on their own, so long-lived grains are safe.
+- **Requirements.** Redis 5 or later (the member cleanup script relies on effect replication) and MongoDB 4.2 or later
+  (`$$NOW`). The Redis scripts are not compatible with Redis Cluster (keys of one operation live in different slots).
+- **Upgrading from upstream.** Data written by upstream Proto.Actor is read as is. During a rolling deploy that mixes
+  versions on MongoDB, members still on the upstream version cannot read spawn locks taken by upgraded members (the new
+  lock timestamp field is unknown to them); their lookups of an identity being activated at that moment fail and are
+  retried. This ends when the rollout completes.
 - **PostgreSQL schema.** The table and its indexes are created on startup. Set `CreateSchema = false` and apply
   `PostgreSqlIdentityStorage.CreateSchemaSql()` through your migrations if the schema is managed separately.
 
@@ -278,6 +286,8 @@ alternative to the Kubernetes or Consul providers. After joining, membership is 
 - **Redis** (`RedisSeedNodeDiscovery`, package `Proto.Cluster.SeedNode.Redis`)
   - Entries expire after `memberTtl` (default 30 seconds) unless refreshed, like PostgreSQL.
   - Requires Redis or Valkey 7.4 or later (hash field expiration).
+  - Only the entries a member registers get an expiration. Entries written by older versions (or other applications
+    sharing the hash) never expire; remove them with `HDEL` once every member runs this version.
 - **MongoDB** (`MongoDbSeedNodeDiscovery`, package `Proto.Cluster.SeedNode.MongoDb`)
   - Entries do not expire; they are removed on shutdown or when another member fails to connect to them.
 

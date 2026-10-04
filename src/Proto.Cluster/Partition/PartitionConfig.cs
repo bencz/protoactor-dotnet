@@ -15,8 +15,10 @@ public record PartitionConfig
 
     /// <summary>
     ///     This is the longest the system will wait for the current activations to complete before forcing a rebalance.
+    ///     Default is 15 seconds, longer than the default <see cref="ActivationRequestAttempts" /> x
+    ///     <see cref="ClusterConfig.ActorActivationTimeout" /> (2 x 5 s), so a rebalance waits for retried activations.
     /// </summary>
-    public TimeSpan RebalanceActivationsCompletionTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan RebalanceActivationsCompletionTimeout { get; init; } = TimeSpan.FromSeconds(15);
 
     public TimeSpan RebalanceRequestTimeout { get; init; } = TimeSpan.FromSeconds(2);
 

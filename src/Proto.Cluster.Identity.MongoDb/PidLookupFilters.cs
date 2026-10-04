@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Proto.Cluster.Identity.MongoDb;
@@ -14,7 +16,13 @@ internal static class PidLookupFilters
     public static FilterDefinition<PidLookupEntity> LockedEntry(string key, string lockId) =>
         Filter.Eq(e => e.Key, key) & Filter.Eq(e => e.LockedBy, lockId);
 
-    public static FilterDefinition<PidLookupEntity> HasMember { get; } = Filter.Ne(e => e.MemberId, null);
+    /// <summary>
+    ///     Activations of the given cluster that belong to a member. Keys are <c>{clusterName}/{identity}</c>, so an anchored
+    ///     prefix on the key keeps other clusters sharing the collection out and is served by the primary key index.
+    /// </summary>
+    public static FilterDefinition<PidLookupEntity> ClusterMembers(string clusterName) =>
+        Filter.Regex(e => e.Key, new BsonRegularExpression("^" + Regex.Escape(clusterName + "/"))) &
+        Filter.Ne(e => e.MemberId, null);
 
     public static bool IsDuplicateKey(MongoWriteException exception) =>
         exception.WriteError?.Category == ServerErrorCategory.DuplicateKey;

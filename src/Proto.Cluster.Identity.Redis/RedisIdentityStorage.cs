@@ -245,9 +245,10 @@ public sealed class RedisIdentityStorage : IIdentityStorage
         var prefix = _memberKey.ToString();
         var pattern = RedisPatterns.Escape(prefix) + "*";
         var memberIds = new HashSet<RedisValue>();
+        var primaries = _connections.GetServers().Where(server => !server.IsReplica).ToArray();
 
         // Keys live on the primaries; SCAN is incremental, so this does not block the server like KEYS would
-        foreach (var server in _connections.GetServers().Where(server => server.IsConnected && !server.IsReplica))
+        foreach (var server in primaries.Where(server => server.IsConnected))
         {
             await foreach (var key in server.KeysAsync(db.Database, pattern, RemoveMemberBatchSize)
                                .WithCancellation(ct)
@@ -262,7 +263,11 @@ public sealed class RedisIdentityStorage : IIdentityStorage
             await db.SetAddAsync(_membersKey, memberIds.ToArray()).ConfigureAwait(false);
         }
 
-        await db.StringSetAsync(_membersBackfilledKey, 1).ConfigureAwait(false);
+        // Only mark the backfill as done if every primary was scanned; otherwise the next sweep tries again
+        if (primaries.All(server => server.IsConnected))
+        {
+            await db.StringSetAsync(_membersBackfilledKey, 1).ConfigureAwait(false);
+        }
     }
 
     public async Task<StoredActivation?> TryGetExistingActivation(

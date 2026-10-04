@@ -119,7 +119,8 @@ public class EtcdProvider : IClusterProvider
                 _cluster.MemberList.UpdateClusterTopology(members);
             }, cancellationToken: _stoppingCts.Token);
 
-            Logger.LogDebug("Stopped watching for member changes");
+            // The client keeps the watch running in the background until the stopping token is cancelled
+            Logger.LogDebug("Watching for member changes");
         }, _stoppingCts.Token);
     }
 

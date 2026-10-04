@@ -34,8 +34,9 @@ internal sealed class PostgreSqlIdentitySql
             ON CONFLICT DO NOTHING
             """;
 
+        // The lock age comes from the database clock, so clock differences between members do not matter
         Lookup = $"""
-            SELECT locked_by, member_id, address, pid_id
+            SELECT locked_by, member_id, address, pid_id, extract(epoch FROM now() - updated_at)::float8
             FROM {table}
             WHERE cluster_name = $1 AND kind = $2 AND identity = $3
             """;

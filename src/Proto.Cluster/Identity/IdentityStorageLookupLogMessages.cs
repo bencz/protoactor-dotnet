@@ -14,4 +14,7 @@ internal static partial class IdentityStorageLookupLogMessages
 
     [LoggerMessage(2, LogLevel.Warning, "Failed to remove stale members from the identity storage")]
     internal static partial void StaleMemberSweepFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(3, LogLevel.Warning, "Failed to remove the activations of member {MemberId}, which left the cluster")]
+    internal static partial void LeftMemberCleanupFailed(this ILogger logger, Exception exception, string memberId);
 }

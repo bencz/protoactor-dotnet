@@ -255,8 +255,8 @@ var system = new ActorSystem(actorSystemConfig)
 | `ActorRequestTimeout` | 5 s | How long one attempt of a cluster request waits before it is sent again | Longer than the slowest `OnStarted` plus the slowest handler. Rounded up to whole seconds, minimum 1 s **(fork)**. |
 | `ActorActivationTimeout` | 5 s | How long the identity owner waits for an activator to spawn the grain | Spawning returns as soon as the actor is created; `OnStarted` does not count. Keep the default. |
 | `PartitionConfig.GetPidTimeout` | 5 s | How long a caller waits for the identity owner to resolve a PID | Longer than a rebalance (`RebalanceActivationsCompletionTimeout` plus the handover), or requests fail during scale events. |
-| `PartitionConfig.RebalanceActivationsCompletionTimeout` | 10 s | How long a rebalance waits for in-flight activations | At least `ActivationRequestAttempts x ActorActivationTimeout`. |
-| `PartitionConfig.ActivationRequestAttempts` **(fork)** | 2 | Retries of a timed out activation request against the same member | Prevents duplicate activations when a member is slow. |
+| `PartitionConfig.RebalanceActivationsCompletionTimeout` | 15 s **(fork)**, 10 s upstream | How long a rebalance waits for in-flight activations | At least `ActivationRequestAttempts x ActorActivationTimeout`. |
+| `PartitionConfig.ActivationRequestAttempts` **(fork)** | 2 | Retries of a timed out activation request against the same member | Prevents duplicate activations when a member is slow. Until that member answers, requests for the identities it was asked to activate keep going to it; enable `HeartbeatExpiration` so a member that hangs without leaving is removed. |
 | `HeartbeatExpiration` | disabled | Blocks members whose gossip heartbeat stops | Enable (e.g. 20 s) so frozen members are removed without waiting for the provider. |
 | `GossipInterval` | 300 ms | Gossip frequency | Keep the default unless measurements say otherwise. |
 
@@ -395,7 +395,9 @@ Consequences:
 ### Failures in `OnStarted`
 
 - **(fork)** If `OnStarted` throws, the grain is deactivated: pending and incoming requests get a `DeadLetterResponse`,
-  callers retry, and the next request activates it again. Nothing restarts in the background.
+  callers retry (backing off when it keeps failing), and the next request activates it again. Nothing restarts in the
+  background. `OnStopping` and `OnStopped` are not called, since the grain never started and has no state to clean up
+  or save.
 - In upstream Proto.Actor the grain is restarted instead, and a slow `OnStarted` that keeps failing restarts forever.
 - **Do not `Poison` yourself from `OnStarted`** to signal a failure: the poison pill waits behind the requests already
   queued, which then run against missing state. Throw instead, or set a "failed" flag that makes every handler answer
@@ -543,8 +545,12 @@ Know what Pub/Sub guarantees before relying on it:
 - **Publishing is acknowledged before delivery.** The topic answers the publisher as soon as it has handed the batch to
   the delivery actor of each member. A successful publish means "accepted by the topic", not "processed by every
   subscriber".
-- **Pub/Sub never redelivers.** Each subscriber gets the batch with a timeout of `PubSubConfig.SubscriberTimeout`
-  (default 5 s, rounded up to whole seconds), and a failed delivery is not retried; there is no dead letter queue.
+- **A batch can reach a subscriber more than once.** The `BatchingProducer` retries a publish that timed out
+  **(fork)**, even if the topic already delivered it, and virtual actor subscribers are called with cluster requests,
+  which are resent after every `ActorRequestTimeout`. Make subscribers idempotent; use
+  `PublishingErrorHandlers.FailBatchAndStop` if publishing must never be repeated.
+- **A failed delivery is not retried by Pub/Sub itself.** Each subscriber gets the batch with a timeout of
+  `PubSubConfig.SubscriberTimeout` (default 5 s, rounded up to whole seconds); there is no dead letter queue.
   - A subscriber that is **alive but slow** still processes the batch: it is already in its mailbox, so the timeout only
     means it arrives late. A burst of 200 messages to a subscriber that needs 25 ms per message, with a 1 s timeout,
     logs 161 timeouts and still delivers all 200 messages in order.
@@ -569,7 +575,7 @@ Know what Pub/Sub guarantees before relying on it:
 
 - **Errors** are handled by `BatchingProducerConfig.OnPublishingError`. The default, `PublishingErrorHandlers.RetryThenFailBatch()`
   **(fork)**, retries a failed batch 3 times with exponential backoff, then fails only that batch and keeps the producer
-  running. Upstream stops the producer on the first error, so every later publish fails until it is recreated; use
+  running. A retried batch may already have been delivered, so subscribers can receive it more than once. Upstream stops the producer on the first error, so every later publish fails until it is recreated; use
   `PublishingErrorHandlers.FailBatchAndStop` if you want that behavior.
 - **`MaxQueueSize`** bounds the queue; when it is full `ProduceAsync` throws `ProducerQueueFullException`. Without it the
   queue is unbounded.

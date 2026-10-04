@@ -679,15 +679,17 @@ internal class PartitionIdentityActor : IActor
             {
                 var (response, activatorUnresponsive) = await rst.ConfigureAwait(false);
 
-                if (activatorUnresponsive)
+                if (response.Pid is not null)
+                {
+                    _unresponsiveActivators.Remove(msg.ClusterIdentity);
+                }
+                else if (activatorUnresponsive)
                 {
                     Logger.ActivatorUnresponsive(msg.ClusterIdentity, activatorAddress);
                     _unresponsiveActivators[msg.ClusterIdentity] = activatorAddress;
                 }
-                else
-                {
-                    _unresponsiveActivators.Remove(msg.ClusterIdentity);
-                }
+
+                // Any other failure keeps the activator remembered so far: it may still be creating the activation
 
                 if (_partitionLookup.TryGetValue(msg.ClusterIdentity, out var pid))
                 {
@@ -764,7 +766,10 @@ internal class PartitionIdentityActor : IActor
             }
             finally
             {
-                var wasPresent = _spawns.Remove(msg.ClusterIdentity);
+                // Only remove this spawn: if the activator left, a newer spawn for the identity may have replaced it
+                var wasPresent = _spawns.TryGetValue(msg.ClusterIdentity, out var current) &&
+                                 current.Response == setResponse &&
+                                 _spawns.Remove(msg.ClusterIdentity);
 
                 if (wasPresent && _rebalanceTcs is not null && _spawns.Count == 0)
                 {
@@ -789,6 +794,8 @@ internal class PartitionIdentityActor : IActor
         var timeout = _cluster.Config.ActorActivationTimeout;
         var maxAttempts = Math.Max(1, _config.ActivationRequestAttempts);
         var activatorPid = PartitionManager.RemotePartitionPlacementActor(activatorAddress);
+        var system = context.System;
+        var timedOut = false;
 
         for (var attempt = 1;; attempt++)
         {
@@ -800,23 +807,29 @@ internal class PartitionIdentityActor : IActor
                         activatorAddress, req.Identity, req.Kind);
                 }
 
-                if (context.System.Metrics.Enabled)
+                if (system.Metrics.Enabled)
                 {
                     IdentityMetrics.ActivationRequestSentCount.Add(1,
-                        new KeyValuePair<string, object?>("id", context.System.Id),
-                        new KeyValuePair<string, object?>("address", context.System.Address),
+                        new KeyValuePair<string, object?>("id", system.Id),
+                        new KeyValuePair<string, object?>("address", system.Address),
                         new KeyValuePair<string, object?>("clusterkind", req.Kind));
                 }
 
-                var res = await context.RequestAsync<ActivationResponse>(activatorPid, req, timeout).ConfigureAwait(false);
+                // The first attempt runs inside the actor's turn; retries run on another thread, where the actor's
+                // context must not be used
+                var res = attempt == 1
+                    ? await context.RequestAsync<ActivationResponse>(activatorPid, req, timeout).ConfigureAwait(false)
+                    : await system.Root.RequestAsync<ActivationResponse>(activatorPid, req, timeout).ConfigureAwait(false);
 
-                return new SpawnOutcome(res, false);
+                return new SpawnOutcome(res, timedOut);
             }
             catch (TimeoutException)
             {
                 // The activator may be busy rather than gone: it could still create the activation after we stopped
                 // waiting. Asking it again is safe, it answers with the activation it created. Asking another member is
                 // not, that would create a second activation.
+                timedOut = true;
+
                 if (!IsMember(activatorAddress))
                 {
                     return new SpawnOutcome(new ActivationResponse { Failed = true }, false);
@@ -831,7 +844,7 @@ internal class PartitionIdentityActor : IActor
             }
             catch
             {
-                return new SpawnOutcome(new ActivationResponse { Failed = true }, false);
+                return new SpawnOutcome(new ActivationResponse { Failed = true }, timedOut);
             }
         }
     }

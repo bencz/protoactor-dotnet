@@ -87,7 +87,7 @@ public class IdentityStorageLookup : IIdentityLookup
                 foreach (var left in e.Left)
                     //YOLO. event stream is not async
                 {
-                    _ = RemoveMemberAsync(left.Id);
+                    _ = RemoveLeftMemberAsync(left.Id);
                 }
             }
         );
@@ -126,6 +126,19 @@ public class IdentityStorageLookup : IIdentityLookup
     }
 
     internal Task RemoveMemberAsync(string memberId) => Storage.RemoveMember(memberId, CancellationToken.None);
+
+    private async Task RemoveLeftMemberAsync(string memberId)
+    {
+        try
+        {
+            await RemoveMemberAsync(memberId).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            // Lookups of its identities still remove them lazily, and the next member to start sweeps them
+            Logger.LeftMemberCleanupFailed(e, memberId);
+        }
+    }
 
     private async Task SweepStaleMembersAsync()
     {

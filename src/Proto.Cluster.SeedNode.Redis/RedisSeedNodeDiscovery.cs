@@ -13,7 +13,8 @@ namespace Proto.Cluster.SeedNode.Redis;
 /// <summary>
 ///     Stores the seed node members in a Redis hash. Every entry expires after <c>memberTtl</c> unless the member that
 ///     registered it keeps refreshing it, so members that die without deregistering (crash, SIGKILL, lost node) disappear
-///     on their own.
+///     on their own. Only the entries this instance registers get an expiration: entries written by other writers sharing
+///     the hash (older versions, other applications) are left untouched and must be removed by their owners.
 ///     Requires Redis or Valkey 7.4+ (hash field expiration).
 /// </summary>
 [PublicAPI]
@@ -47,8 +48,6 @@ public class RedisSeedNodeDiscovery : ISeedNodeDiscovery, IDisposable
 
     public async Task Register(string memberId, string host, int port)
     {
-        await ExpireEntriesWithoutTtlAsync().ConfigureAwait(false);
-
         RedisValue address = SeedNodeAddress.Format(host, port);
         await WriteEntryAsync(memberId, address).ConfigureAwait(false);
 
@@ -121,18 +120,6 @@ public class RedisSeedNodeDiscovery : ISeedNodeDiscovery, IDisposable
         _ = transaction.HashFieldExpireAsync(_key, new RedisValue[] { memberId }, _memberTtl);
 
         return transaction.ExecuteAsync();
-    }
-
-    // Entries written by versions without expiration never go away on their own; give them a TTL so stale ones
-    // disappear. Entries that already expire (refreshed by live members) are left untouched.
-    private async Task ExpireEntriesWithoutTtlAsync()
-    {
-        var memberIds = await _db.HashKeysAsync(_key).ConfigureAwait(false);
-
-        if (memberIds.Length > 0)
-        {
-            await _db.HashFieldExpireAsync(_key, memberIds, _memberTtl, ExpireWhen.HasNoExpiry).ConfigureAwait(false);
-        }
     }
 
     private async Task RefreshAsync(string memberId, RedisValue address, CancellationToken ct)

@@ -16,6 +16,7 @@ public abstract class IdentityStorageTests : IDisposable
     private static int testId = 1;
     private readonly IIdentityStorage _storage;
     private readonly IIdentityStorage _storageInstance2;
+    private readonly IIdentityStorage _otherClusterStorage;
     private readonly ITestOutputHelper _testOutputHelper;
 
     protected IdentityStorageTests(
@@ -27,6 +28,7 @@ public abstract class IdentityStorageTests : IDisposable
         var clusterName = $"test-{Guid.NewGuid().ToString("N").Substring(0, 6)}";
         _storage = storageFactory(clusterName);
         _storageInstance2 = storageFactory(clusterName);
+        _otherClusterStorage = storageFactory($"{clusterName}-other");
     }
 
     public void Dispose()
@@ -44,6 +46,7 @@ public abstract class IdentityStorageTests : IDisposable
 
         _storage?.Dispose();
         _storageInstance2?.Dispose();
+        _otherClusterStorage?.Dispose();
     }
 
     [Fact]
@@ -283,6 +286,25 @@ public abstract class IdentityStorageTests : IDisposable
         remaining.Should().Contain(otherActivator.Id);
     }
 
+    [Fact]
+    public async Task DoesNotReturnMembersOfOtherClustersSharingTheStorage()
+    {
+        var timeout = new CancellationTokenSource(TimeoutMs).Token;
+        var (activator, _, _) = await GetActivatedClusterIdentity(timeout);
+
+        var otherActivator = GetFakeActivator();
+        var otherIdentity = new ClusterIdentity { Kind = "thing", Identity = NextId().ToString() };
+        var otherLock = await _otherClusterStorage.TryAcquireLock(otherIdentity, timeout);
+        await _otherClusterStorage.StoreActivation(otherActivator.Id, otherLock!, Activate(otherActivator, otherIdentity),
+            timeout);
+
+        var memberIds = await _storage.GetMemberIds(timeout);
+        var otherMemberIds = await _otherClusterStorage.GetMemberIds(timeout);
+
+        memberIds.Should().Contain(activator.Id).And.NotContain(otherActivator.Id);
+        otherMemberIds.Should().Contain(otherActivator.Id).And.NotContain(activator.Id);
+    }
+
     private async Task<(Member, ClusterIdentity, PID activation)> GetActivatedClusterIdentity(
         CancellationToken timeout,
         Member? activator = null,
@@ -340,6 +362,28 @@ public abstract class IdentityStorageTests : IDisposable
             .NotBeNull(
                 "When an activation did not occur, the storage implementation should discard the lock"
             );
+    }
+
+    [Fact]
+    public async Task StaleLockIsRemovedByWaitersWhoseTimeoutIsShorterThanTheStaleLockWait()
+    {
+        // Storages are created with a stale lock wait of 1.5 s; the waiters below give up after 1 s, like a worker whose
+        // ActorActivationTimeout is not longer than the stale lock wait
+        var identity = new ClusterIdentity { Kind = "thing", Identity = NextId().ToString() };
+        var abandonedLock = await _storage.TryAcquireLock(identity, CancellationToken.None);
+        abandonedLock.Should().NotBeNull();
+
+        var firstWaiter = () => _storage.WaitForActivation(identity, new CancellationTokenSource(1000).Token);
+        await firstWaiter.Should().ThrowAsync<OperationCanceledException>();
+
+        // By now the lock is older than the stale lock wait
+        await Task.Delay(1000);
+
+        var activation = await _storage.WaitForActivation(identity, new CancellationTokenSource(1000).Token);
+        activation.Should().BeNull();
+
+        var spawnLock = await _storage.TryAcquireLock(identity, CancellationToken.None);
+        spawnLock.Should().NotBeNull("a lock older than the stale lock wait must be removable by any waiter");
     }
 
     // ReSharper disable once SuggestBaseTypeForParameter

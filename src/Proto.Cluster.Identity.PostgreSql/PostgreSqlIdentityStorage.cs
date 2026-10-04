@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -89,16 +88,23 @@ public sealed class PostgreSqlIdentityStorage : IIdentityStorage
 
         if (lockId != null)
         {
-            //There is an active lock on the identity, spin wait with incremental backoff until the lock is considered stale
-            var timer = Stopwatch.StartNew();
+            // The lock is stale once it is older than the stale lock wait, however long this caller has waited, so a
+            // caller arriving after earlier callers gave up removes an abandoned lock right away
+            var staleAt = DateTime.UtcNow + (_options.MaxWaitBeforeStaleLock - entry!.Age);
             var i = 1;
 
-            do
+            while (DateTime.UtcNow < staleAt)
             {
                 // Back off a little more on every check, capped so a released lock is noticed quickly
                 await Task.Delay(Math.Min(20 * i++, 200), ct).ConfigureAwait(false);
-            } while ((entry = await LookupAsync(clusterIdentity, ct).ConfigureAwait(false))?.LockedBy == lockId &&
-                     timer.Elapsed < _options.MaxWaitBeforeStaleLock);
+
+                entry = await LookupAsync(clusterIdentity, ct).ConfigureAwait(false);
+
+                if (entry?.LockedBy != lockId)
+                {
+                    break;
+                }
+            }
         }
 
         if (entry == null)
@@ -217,12 +223,13 @@ public sealed class PostgreSqlIdentityStorage : IIdentityStorage
                     reader.IsDBNull(0) ? null : reader.GetString(0),
                     reader.IsDBNull(1) ? null : reader.GetString(1),
                     reader.IsDBNull(2) ? null : reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3)
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    TimeSpan.FromSeconds(reader.GetDouble(4))
                 );
             }
         );
 
-    private sealed record ActivationEntry(string? LockedBy, string? MemberId, string? Address, string? PidId)
+    private sealed record ActivationEntry(string? LockedBy, string? MemberId, string? Address, string? PidId, TimeSpan Age)
     {
         public StoredActivation? ToActivation() =>
             MemberId is null || Address is null || PidId is null
