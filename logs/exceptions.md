@@ -85,6 +85,8 @@ System.Exception : Failed to reach consensus
 ```
 All 23 tests of the fixture failed in 1 ms because the 3-member test cluster did not reach gossip topology consensus while starting (first run right after a build, many fixtures starting in parallel). Unrelated to MongoDB; the next two runs passed 70/70.
 
+**Update:** this explanation was wrong. The real cause is the `TestProvider` stale snapshot race described in the "MongoDB 9.0.2" entry below.
+
 ### Proto.Cluster.MongoIdentity.Tests.ChaosMongoIdentityClusterFixture (class fixture initialization, CI)
 ```
 System.Exception : Failed to reach consensus
@@ -93,6 +95,8 @@ System.Exception : Failed to reach consensus
 ```
 Same failure on the GitHub Actions runner (2 vCPU): all 23 tests of the chaos fixture failed, 47 others passed.
 
+**Update:** this explanation was wrong. The real cause is the `TestProvider` stale snapshot race described in the "MongoDB 9.0.2" entry below.
+
 ### Proto.Cluster.MongoIdentity.Tests.ChaosMongoIdentityClusterFixture (class fixture initialization, CI, MongoDB 9.0.2)
 ```
 System.Exception : Failed to reach consensus
@@ -100,3 +104,5 @@ System.Exception : Failed to reach consensus
    at Proto.Cluster.Tests.ClusterFixture.InitializeAsync() in tests/Proto.Cluster.Tests/ClusterFixture.cs:line 126
 ```
 Root cause found (the earlier "unrelated, flaky under load" notes above were wrong): a race in `TestProvider.NotifyStatuses`. The in-memory agent raises status updates on the thread of whichever member registers, and the provider read the member snapshot and applied it without mutual exclusion. A thread holding an older snapshot (2 members) could apply it after another thread applied the newer one (3 members), so the member list saw a joined member as left and blocked it permanently (`I have been blocked, exiting`), and consensus was never reached. Both Mongo cluster fixtures were affected, also when run alone. Fixed by serializing snapshot read and apply per provider. Pinned to 2 cores against MongoDB 9: before the fix 4/8 runs failed, each failing run logged a blocked member; after the fix 12/12 passed with no blocked member. Test infrastructure only; upstream had the same code but never ran the Mongo tests in CI.
+
+Follow-up from code review: stopped `TestProvider`s now unsubscribe from the shared `InMemAgent` (before, dead members kept receiving and applying snapshots), and `InMemAgent` delivers each status update to every handler even if one throws (before, one failing handler aborted delivery and made `RegisterService` throw for the joining member). Both covered by `TestProviderTests`, which failed before the change.

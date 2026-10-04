@@ -7,6 +7,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using Microsoft.Extensions.Logging;
 
 namespace Proto.Cluster.Testing;
 
@@ -25,11 +26,38 @@ public class AgentServiceStatus
 
 public sealed class InMemAgent
 {
+    private static readonly ILogger Logger = Log.CreateLogger<InMemAgent>();
     private readonly ConcurrentDictionary<string, AgentServiceStatus> _services = new();
 
     public event EventHandler StatusUpdate;
 
-    private void OnStatusUpdate(EventArgs e) => StatusUpdate?.Invoke(this, e);
+    /// <summary>
+    ///     Number of handlers currently subscribed to <see cref="StatusUpdate" />.
+    /// </summary>
+    public int StatusUpdateSubscriberCount => StatusUpdate?.GetInvocationList().Length ?? 0;
+
+    private void OnStatusUpdate(EventArgs e)
+    {
+        var handlers = StatusUpdate?.GetInvocationList();
+
+        if (handlers is null)
+        {
+            return;
+        }
+
+        // Handlers run on the caller's thread; one failing member must not stop the others from seeing the update
+        foreach (var handler in handlers)
+        {
+            try
+            {
+                ((EventHandler)handler).Invoke(this, e);
+            }
+            catch (Exception exception)
+            {
+                Logger.StatusUpdateHandlerFailed(exception);
+            }
+        }
+    }
 
     public AgentServiceStatus[] GetServicesHealth() => _services.Values.ToArray();
 

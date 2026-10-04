@@ -65,9 +65,11 @@ public class TestProvider : IClusterProvider
 
     public Task ShutdownAsync(bool graceful)
     {
-        Logger.LogDebug("Unregistering service {Service}", _id);
+        Logger.UnregisteringService(_id);
 
         _ttlReportTimer?.Stop();
+        // Unsubscribe first: a stopped member must not keep applying topology snapshots, including its own removal
+        _agent.StatusUpdate -= AgentOnStatusUpdate;
         _agent.DeregisterService(_id);
 
         return Task.CompletedTask;
@@ -90,7 +92,10 @@ public class TestProvider : IClusterProvider
     {
         var statuses = _agent.GetServicesHealth();
 
-        Logger.LogDebug("TestAgent response: {@Response}", (object)statuses);
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logger.TestAgentResponse(statuses.Length, string.Join(", ", statuses.Select(status => status.ID)));
+        }
 
         var memberStatuses =
             statuses.Select(
