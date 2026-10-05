@@ -9,6 +9,9 @@ namespace Proto.Mailbox.Tests;
 
 public class EscalateFailureTests
 {
+    // Waits end as soon as the condition holds; the margin only matters on slow CI runners
+    private static readonly TimeSpan ConditionTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task GivenCompletedUserMessageTaskThrewException_ShouldEscalateFailure()
     {
@@ -22,7 +25,7 @@ public class EscalateFailureTests
 
         mailbox.PostUserMessage(msg1);
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         var e = Assert.IsType<Exception>(mailboxHandler.EscalatedFailures[0]);
@@ -42,7 +45,7 @@ public class EscalateFailureTests
 
         mailbox.PostSystemMessage(msg1);
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         var e = Assert.IsType<Exception>(mailboxHandler.EscalatedFailures[0]);
@@ -64,7 +67,7 @@ public class EscalateFailureTests
         _ = Task.Run(() => msg1.TaskCompletionSource.SetException(taskException));
 
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         var e = Assert.IsType<Exception>(mailboxHandler.EscalatedFailures[0]);
@@ -87,7 +90,7 @@ public class EscalateFailureTests
         _ = Task.Run(() => msg1.TaskCompletionSource.SetException(taskException));
 
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         var e = Assert.IsType<Exception>(mailboxHandler.EscalatedFailures[0]);
@@ -106,7 +109,7 @@ public class EscalateFailureTests
 
         mailbox.PostUserMessage(msg1);
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         Assert.IsType<TaskCanceledException>(mailboxHandler.EscalatedFailures[0]);
@@ -124,7 +127,7 @@ public class EscalateFailureTests
 
         mailbox.PostSystemMessage(msg1);
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         Assert.IsType<TaskCanceledException>(mailboxHandler.EscalatedFailures[0]);
@@ -145,8 +148,7 @@ public class EscalateFailureTests
 
         await AwaitConditionAsync(
             () => mailboxHandler.EscalatedFailures.Count == 1,
-            // allow additional time for the asynchronous cancellation to propagate
-            TimeSpan.FromMilliseconds(500));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         Assert.IsType<TaskCanceledException>(mailboxHandler.EscalatedFailures[0]);
@@ -167,7 +169,7 @@ public class EscalateFailureTests
         _ = Task.Run(() => msg1.TaskCompletionSource.SetCanceled());
 
         await AwaitConditionAsync(() => mailboxHandler.EscalatedFailures.Count == 1,
-            TimeSpan.FromMilliseconds(100));
+            ConditionTimeout);
 
         Assert.Single(mailboxHandler.EscalatedFailures);
         Assert.IsType<TaskCanceledException>(mailboxHandler.EscalatedFailures[0]);

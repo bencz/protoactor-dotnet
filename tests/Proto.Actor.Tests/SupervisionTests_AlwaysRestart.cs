@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Proto.TestKit;
 using Xunit;
@@ -25,9 +26,9 @@ public class SupervisionTestsAlwaysRestart
         context.Send(probePid, "start");
         await probe.FishForMessageAsync<string>();
 
-        var child1Props = Props.FromProducer(() => new ChildActor(() => child1Started++))
+        var child1Props = Props.FromProducer(() => new ChildActor(() => Interlocked.Increment(ref child1Started)))
             .WithMailboxProbe(probe);
-        var child2Props = Props.FromProducer(() => new ChildActor(() => child2Started++));
+        var child2Props = Props.FromProducer(() => new ChildActor(() => Interlocked.Increment(ref child2Started)));
 
         var parentProps = Props.FromProducer(() => new ParentActor(child1Props, child2Props))
             .WithChildSupervisorStrategy(strategy);
@@ -39,8 +40,11 @@ public class SupervisionTestsAlwaysRestart
         // Wait for the restart system message instead of relying on elapsed time
         await probe.FishForMessageAsync<Restart>();
 
-        Assert.Equal(2, child1Started);
-        Assert.Equal(1, child2Started);
+        // The new incarnation runs Started after the Restart message is processed, so wait for it
+        await TestKit.TestKit.AwaitConditionAsync(() => Volatile.Read(ref child1Started) == 2, TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, Volatile.Read(ref child1Started));
+        Assert.Equal(1, Volatile.Read(ref child2Started));
     }
 
     [Fact]

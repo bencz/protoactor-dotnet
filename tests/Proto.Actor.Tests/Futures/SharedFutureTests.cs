@@ -114,7 +114,11 @@ public class SharedFutureTests : BaseFutureTests
                 // SharedFutureProcess increments by the slot count and wraps into [1, max] using the same arithmetic as the runtime.
                 var expectedNext = (uint)(((currentRequestId - 1u + (uint)slotCount) % (uint)forcedMaxRequestId) + 1u);
 
-                future = process.TryCreateHandle() ?? throw new Exception("Expected shared future handle");
+                // The reply completes the task before the slot is returned to the pool, so wait for it to come back
+                IFuture? next = null;
+                await TestKit.TestKit.AwaitConditionAsync(() => (next = process.TryCreateHandle()) is not null,
+                    TimeSpan.FromSeconds(5));
+                future = next!;
                 future.Pid.RequestId.Should().Be(expectedNext);
             }
         }

@@ -9,6 +9,9 @@ namespace Proto.Mailbox.Tests;
 
 public class MailboxSchedulingTests
 {
+    // Waits end as soon as the condition holds; the margin only matters on slow CI runners
+    private static readonly TimeSpan ConditionTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task GivenNonCompletedUserMessage_ShouldHaltProcessingUntilCompletion()
     {
@@ -24,7 +27,7 @@ public class MailboxSchedulingTests
         mailbox.PostUserMessage(msg1);
         mailbox.PostUserMessage(msg2);
 
-        await AwaitConditionAsync(() => userMailbox.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => userMailbox.HasMessages, ConditionTimeout);
 
         Assert.True(userMailbox.HasMessages,
             "Mailbox should not have processed msg2 because processing of msg1 is not completed."
@@ -32,7 +35,7 @@ public class MailboxSchedulingTests
 
         msg2.TaskCompletionSource.SetResult(0);
         msg1.TaskCompletionSource.SetResult(0);
-        await AwaitConditionAsync(() => !userMailbox.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => !userMailbox.HasMessages, ConditionTimeout);
 
         Assert.False(userMailbox.HasMessages,
             "Mailbox should have processed msg2 because processing of msg1 is completed."
@@ -56,7 +59,7 @@ public class MailboxSchedulingTests
         mailbox.PostUserMessage(msg1);
         mailbox.PostUserMessage(msg2);
 
-        await AwaitConditionAsync(() => !userMailbox.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => !userMailbox.HasMessages, ConditionTimeout);
 
         Assert.False(userMailbox.HasMessages,
             "Mailbox should have processed both messages because they were already completed."
@@ -84,7 +87,7 @@ public class MailboxSchedulingTests
 
         msg2.TaskCompletionSource.SetResult(0);
         msg1.TaskCompletionSource.SetResult(0);
-        await AwaitConditionAsync(() => !systemMessages.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => !systemMessages.HasMessages, ConditionTimeout);
 
         Assert.False(systemMessages.HasMessages,
             "Mailbox should have processed msg2 because processing of msg1 is completed."
@@ -107,7 +110,7 @@ public class MailboxSchedulingTests
 
         mailbox.PostSystemMessage(msg1);
         mailbox.PostSystemMessage(msg2);
-        await AwaitConditionAsync(() => !systemMessages.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => !systemMessages.HasMessages, ConditionTimeout);
 
         Assert.False(systemMessages.HasMessages,
             "Mailbox should have processed both messages because they were already completed."
@@ -126,9 +129,9 @@ public class MailboxSchedulingTests
         var msg1 = new TestMessageWithTaskCompletionSource();
         mailbox.PostUserMessage(msg1);
 
-        await AwaitConditionAsync(() => !userMailbox.HasMessages, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => !userMailbox.HasMessages, ConditionTimeout);
         msg1.TaskCompletionSource.SetResult(0);
-        await AwaitConditionAsync(() => mailbox.Status == 0, TimeSpan.FromMilliseconds(100));
+        await AwaitConditionAsync(() => mailbox.Status == 0, ConditionTimeout);
 
         // Mailbox becomes idle (status 0) after completing the user message
         Assert.Equal(0, mailbox.Status);

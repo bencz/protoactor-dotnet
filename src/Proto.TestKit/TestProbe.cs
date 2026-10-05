@@ -16,6 +16,17 @@ namespace Proto.TestKit;
 /// <inheritdoc cref="ITestProbe" />
 public class TestProbe : IActor, ITestProbe
 {
+    /// <summary>
+    ///     Default time to wait for an expected message. The wait ends as soon as the message arrives, so a generous
+    ///     default only delays failing tests and keeps slow CI runners from failing passing ones.
+    /// </summary>
+    public static readonly TimeSpan DefaultReceiveTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    ///     Default time to wait when asserting that no message arrives. Such a wait always lasts the full time.
+    /// </summary>
+    public static readonly TimeSpan DefaultNoMessageTimeout = TimeSpan.FromSeconds(1);
+
     private readonly Channel<MessageAndSender> _channel = Channel.CreateUnbounded<MessageAndSender>();
 
     private IContext? _context;
@@ -77,12 +88,12 @@ public class TestProbe : IActor, ITestProbe
     public async Task ExpectNoMessageAsync(TimeSpan? timeAllowed = null, CancellationToken cancellationToken = default)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeAllowed ?? TimeSpan.FromSeconds(1));
+        cts.CancelAfter(timeAllowed ?? DefaultNoMessageTimeout);
 
         try
         {
             var item = await _channel.Reader.ReadAsync(cts.Token);
-            var seconds = (timeAllowed ?? TimeSpan.FromSeconds(1)).TotalSeconds.ToString("0.###");
+            var seconds = (timeAllowed ?? DefaultNoMessageTimeout).TotalSeconds.ToString("0.###");
             throw new TestKitException($"Waited {seconds} seconds and received a message of type {item.Message?.GetType()}");
         }
         catch (OperationCanceledException)
@@ -137,7 +148,7 @@ public class TestProbe : IActor, ITestProbe
     public async Task<T> FishForMessageAsync<T>(Func<T, bool> when, TimeSpan? timeAllowed = null,
         CancellationToken cancellationToken = default)
     {
-        var endTime = DateTime.UtcNow + (timeAllowed ?? TimeSpan.FromSeconds(1));
+        var endTime = DateTime.UtcNow + (timeAllowed ?? DefaultReceiveTimeout);
 
         while (DateTime.UtcNow < endTime)
         {
@@ -203,7 +214,7 @@ public class TestProbe : IActor, ITestProbe
         CancellationToken cancellationToken)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeAllowed ?? TimeSpan.FromSeconds(1));
+        cts.CancelAfter(timeAllowed ?? DefaultReceiveTimeout);
 
         try
         {
@@ -213,7 +224,7 @@ public class TestProbe : IActor, ITestProbe
         }
         catch (OperationCanceledException)
         {
-            var seconds = (timeAllowed ?? TimeSpan.FromSeconds(1)).TotalSeconds.ToString("0.###");
+            var seconds = (timeAllowed ?? DefaultReceiveTimeout).TotalSeconds.ToString("0.###");
             throw new TestKitException($"Waited {seconds} seconds but failed to receive a message");
         }
     }

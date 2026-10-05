@@ -22,6 +22,30 @@ public class TestProbeAsyncTests
     }
 
     [Fact]
+    public async Task Default_receive_timeout_tolerates_a_message_that_arrives_after_one_second()
+    {
+        var system = new ActorSystem();
+        var (probe, pid) = system.CreateTestProbe();
+
+        // Simulates a slow CI runner: the expected message arrives later than the old one second default
+        _ = Task.Delay(TimeSpan.FromMilliseconds(1500)).ContinueWith(_ => system.Root.Send(pid, "late"));
+
+        await probe.ExpectNextUserMessageAsync<string>(s => s == "late");
+    }
+
+    [Fact]
+    public async Task Default_no_message_timeout_stays_short()
+    {
+        var system = new ActorSystem();
+        var (probe, _) = system.CreateTestProbe();
+        var started = DateTime.UtcNow;
+
+        await probe.ExpectNoMessageAsync();
+
+        (DateTime.UtcNow - started).Should().BeLessThan(TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
     public async Task GetNextMessageAsync_with_predicate_returns_specific()
     {
         var system = new ActorSystem();

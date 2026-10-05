@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Proto.Mailbox;
 using Proto.TestKit;
@@ -148,9 +147,9 @@ public class SupervisionTestsOneForOne
         context.Send(parent, "3rd restart");
         context.Send(parent, "4th restart");
 
-        Assert.True(SpinWait.SpinUntil(
+        await TestKit.TestKit.AwaitConditionAsync(
             () => childMailboxStats.Received.ToArray().Contains(Stop.Instance),
-            TimeSpan.FromSeconds(5)));
+            TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -172,9 +171,9 @@ public class SupervisionTestsOneForOne
 
         context.Send(parent, "hello");
 
-        Assert.True(SpinWait.SpinUntil(
+        await TestKit.TestKit.AwaitConditionAsync(
             () => childMailboxStats.Received.ToArray().Any(msg => msg is Restart r && r.Reason == Exception),
-            TimeSpan.FromSeconds(5)));
+            TimeSpan.FromSeconds(5));
         Assert.Contains(childMailboxStats.Posted.ToArray(), msg => msg is Restart r && r.Reason == Exception);
         Assert.Contains(childMailboxStats.Received.ToArray(), msg => msg is Restart r && r.Reason == Exception);
     }
